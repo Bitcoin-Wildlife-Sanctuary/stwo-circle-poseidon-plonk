@@ -123,11 +123,11 @@ pub trait FrameworkEval {
 }
 
 pub struct FrameworkComponent<C: FrameworkEval> {
-    eval: C,
-    trace_locations: TreeVec<TreeSubspan>,
-    info: InfoEvaluator,
-    preprocessed_column_indices: Vec<usize>,
-    logup_sums: LogupSums,
+    pub eval: C,
+    pub trace_locations: TreeVec<TreeSubspan>,
+    pub info: InfoEvaluator,
+    pub preprocessed_column_indices: Vec<usize>,
+    pub logup_sums: LogupSums,
 }
 
 impl<E: FrameworkEval> FrameworkComponent<E> {

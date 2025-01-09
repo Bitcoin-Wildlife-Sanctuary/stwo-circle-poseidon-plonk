@@ -320,18 +320,18 @@ impl<'a, B: FriOps + MerkleOps<MC::H>, MC: MerkleChannel> FriProver<'a, B, MC> {
 }
 
 pub struct FriVerifier<MC: MerkleChannel> {
-    config: FriConfig,
+    pub config: FriConfig,
     // TODO(andrew): The first layer currently commits to all input polynomials. Consider allowing
     // flexibility to only commit to input polynomials on a per-log-size basis. This allows
     // flexibility for cases where committing to the first layer, for a specific log size, isn't
     // necessary. FRI would simply return more query positions for the "uncommitted" log sizes.
-    first_layer: FriFirstLayerVerifier<MC::H>,
-    inner_layers: Vec<FriInnerLayerVerifier<MC::H>>,
-    last_layer_domain: LineDomain,
-    last_layer_poly: LinePoly,
+    pub first_layer: FriFirstLayerVerifier<MC::H>,
+    pub inner_layers: Vec<FriInnerLayerVerifier<MC::H>>,
+    pub last_layer_domain: LineDomain,
+    pub last_layer_poly: LinePoly,
     /// The queries used for decommitment. Initialized when calling
     /// [`FriVerifier::sample_query_positions()`].
-    queries: Option<Queries>,
+    pub queries: Option<Queries>,
 }
 
 impl<MC: MerkleChannel> FriVerifier<MC> {
@@ -622,8 +622,8 @@ impl PartialEq<LinePolyDegreeBound> for CirclePolyDegreeBound {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct LinePolyDegreeBound {
-    log_degree_bound: u32,
+pub struct LinePolyDegreeBound {
+    pub log_degree_bound: u32,
 }
 
 impl LinePolyDegreeBound {
@@ -664,13 +664,13 @@ pub struct FriLayerProof<H: MerkleHasher> {
     pub commitment: H::Hash,
 }
 
-struct FriFirstLayerVerifier<H: MerkleHasher> {
+pub struct FriFirstLayerVerifier<H: MerkleHasher> {
     /// The list of degree bounds of all circle polynomials commited in the first layer.
-    column_bounds: Vec<CirclePolyDegreeBound>,
+    pub column_bounds: Vec<CirclePolyDegreeBound>,
     /// The commitment domain all the circle polynomials in the first layer.
-    column_commitment_domains: Vec<CircleDomain>,
-    folding_alpha: SecureField,
-    proof: FriLayerProof<H>,
+    pub column_commitment_domains: Vec<CircleDomain>,
+    pub folding_alpha: SecureField,
+    pub proof: FriLayerProof<H>,
 }
 
 impl<H: MerkleHasher> FriFirstLayerVerifier<H> {
@@ -760,12 +760,12 @@ impl<H: MerkleHasher> FriFirstLayerVerifier<H> {
     }
 }
 
-struct FriInnerLayerVerifier<H: MerkleHasher> {
-    degree_bound: LinePolyDegreeBound,
-    domain: LineDomain,
-    folding_alpha: SecureField,
-    layer_index: usize,
-    proof: FriLayerProof<H>,
+pub struct FriInnerLayerVerifier<H: MerkleHasher> {
+    pub degree_bound: LinePolyDegreeBound,
+    pub domain: LineDomain,
+    pub folding_alpha: SecureField,
+    pub layer_index: usize,
+    pub proof: FriLayerProof<H>,
 }
 
 impl<H: MerkleHasher> FriInnerLayerVerifier<H> {
@@ -1006,7 +1006,7 @@ fn compute_decommitment_positions_and_witness_evals(
 /// # Panics
 ///
 /// Panics if the number of queries doesn't match the number of query evals.
-fn compute_decommitment_positions_and_rebuild_evals(
+pub fn compute_decommitment_positions_and_rebuild_evals(
     queries: &Queries,
     query_evals: &[QM31],
     mut witness_evals: impl Iterator<Item = QM31>,
@@ -1043,15 +1043,15 @@ fn compute_decommitment_positions_and_rebuild_evals(
 }
 
 #[derive(Debug)]
-struct InsufficientWitnessError;
+pub struct InsufficientWitnessError;
 
 /// Foldable subsets of evaluations on a [`CirclePoly`] or [`LinePoly`].
 ///
 /// [`CirclePoly`]: crate::core::poly::circle::CirclePoly
-struct SparseEvaluation {
+pub struct SparseEvaluation {
     // TODO(andrew): Perhaps subset isn't the right word. Coset, Subgroup?
-    subset_evals: Vec<Vec<SecureField>>,
-    subset_domain_initial_indexes: Vec<usize>,
+    pub subset_evals: Vec<Vec<SecureField>>,
+    pub subset_domain_initial_indexes: Vec<usize>,
 }
 
 impl SparseEvaluation {
@@ -1059,7 +1059,10 @@ impl SparseEvaluation {
     ///
     /// Panics if a subset size doesn't equal `2^FOLD_STEP` or there aren't the same number of
     /// domain indexes as subsets.
-    fn new(subset_evals: Vec<Vec<SecureField>>, subset_domain_initial_indexes: Vec<usize>) -> Self {
+    pub fn new(
+        subset_evals: Vec<Vec<SecureField>>,
+        subset_domain_initial_indexes: Vec<usize>,
+    ) -> Self {
         let fold_factor = 1 << FOLD_STEP;
         assert!(subset_evals.iter().all(|e| e.len() == fold_factor));
         assert_eq!(subset_evals.len(), subset_domain_initial_indexes.len());
@@ -1069,7 +1072,7 @@ impl SparseEvaluation {
         }
     }
 
-    fn fold_line(self, fold_alpha: SecureField, source_domain: LineDomain) -> Vec<SecureField> {
+    pub fn fold_line(self, fold_alpha: SecureField, source_domain: LineDomain) -> Vec<SecureField> {
         zip(self.subset_evals, self.subset_domain_initial_indexes)
             .map(|(eval, domain_initial_index)| {
                 let fold_domain_initial = source_domain.coset().index_at(domain_initial_index);
@@ -1080,7 +1083,11 @@ impl SparseEvaluation {
             .collect()
     }
 
-    fn fold_circle(self, fold_alpha: SecureField, source_domain: CircleDomain) -> Vec<SecureField> {
+    pub fn fold_circle(
+        self,
+        fold_alpha: SecureField,
+        source_domain: CircleDomain,
+    ) -> Vec<SecureField> {
         zip(self.subset_evals, self.subset_domain_initial_indexes)
             .map(|(eval, domain_initial_index)| {
                 let fold_domain_initial = source_domain.index_at(domain_initial_index);

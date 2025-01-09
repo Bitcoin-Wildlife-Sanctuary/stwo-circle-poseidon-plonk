@@ -1,10 +1,13 @@
 use itertools::Itertools;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 use starknet_ff::FieldElement as FieldElement252;
 
 use super::CpuBackend;
 use crate::core::fields::m31::BaseField;
 use crate::core::vcs::ops::{MerkleHasher, MerkleOps};
 use crate::core::vcs::poseidon252_merkle::Poseidon252MerkleHasher;
+use crate::parallel_iter;
 
 impl MerkleOps<Poseidon252MerkleHasher> for CpuBackend {
     fn commit_on_layer(
@@ -12,7 +15,7 @@ impl MerkleOps<Poseidon252MerkleHasher> for CpuBackend {
         prev_layer: Option<&Vec<FieldElement252>>,
         columns: &[&Vec<BaseField>],
     ) -> Vec<FieldElement252> {
-        (0..(1 << log_size))
+        parallel_iter!(0..1 << log_size)
             .map(|i| {
                 Poseidon252MerkleHasher::hash_node(
                     prev_layer.map(|prev_layer| (prev_layer[2 * i], prev_layer[2 * i + 1])),

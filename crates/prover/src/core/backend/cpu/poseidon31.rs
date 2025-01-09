@@ -2,22 +2,22 @@ use itertools::Itertools;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-use crate::core::backend::CpuBackend;
+use crate::core::backend::{Col, CpuBackend};
 use crate::core::fields::m31::BaseField;
-use crate::core::vcs::blake2_hash::Blake2sHash;
-use crate::core::vcs::blake2_merkle::Blake2sMerkleHasher;
 use crate::core::vcs::ops::{MerkleHasher, MerkleOps};
+use crate::core::vcs::poseidon31_hash::Poseidon31Hash;
+use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleHasher;
 use crate::parallel_iter;
 
-impl MerkleOps<Blake2sMerkleHasher> for CpuBackend {
+impl MerkleOps<Poseidon31MerkleHasher> for CpuBackend {
     fn commit_on_layer(
         log_size: u32,
-        prev_layer: Option<&Vec<Blake2sHash>>,
-        columns: &[&Vec<BaseField>],
-    ) -> Vec<Blake2sHash> {
+        prev_layer: Option<&Col<Self, Poseidon31Hash>>,
+        columns: &[&Col<Self, BaseField>],
+    ) -> Col<Self, Poseidon31Hash> {
         parallel_iter!(0..1 << log_size)
             .map(|i| {
-                Blake2sMerkleHasher::hash_node(
+                Poseidon31MerkleHasher::hash_node(
                     prev_layer.map(|prev_layer| (prev_layer[2 * i], prev_layer[2 * i + 1])),
                     &columns.iter().map(|column| column[i]).collect_vec(),
                 )

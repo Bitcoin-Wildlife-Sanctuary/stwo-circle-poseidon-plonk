@@ -4,20 +4,20 @@ use rayon::prelude::*;
 
 use crate::core::backend::CpuBackend;
 use crate::core::fields::m31::BaseField;
-use crate::core::vcs::blake2_hash::Blake2sHash;
-use crate::core::vcs::blake2_merkle::Blake2sMerkleHasher;
 use crate::core::vcs::ops::{MerkleHasher, MerkleOps};
+use crate::core::vcs::sha256_hash::Sha256Hash;
+use crate::core::vcs::sha256_merkle::Sha256MerkleHasher;
 use crate::parallel_iter;
 
-impl MerkleOps<Blake2sMerkleHasher> for CpuBackend {
+impl MerkleOps<Sha256MerkleHasher> for CpuBackend {
     fn commit_on_layer(
         log_size: u32,
-        prev_layer: Option<&Vec<Blake2sHash>>,
+        prev_layer: Option<&Vec<Sha256Hash>>,
         columns: &[&Vec<BaseField>],
-    ) -> Vec<Blake2sHash> {
+    ) -> Vec<Sha256Hash> {
         parallel_iter!(0..1 << log_size)
             .map(|i| {
-                Blake2sMerkleHasher::hash_node(
+                Sha256MerkleHasher::hash_node(
                     prev_layer.map(|prev_layer| (prev_layer[2 * i], prev_layer[2 * i + 1])),
                     &columns.iter().map(|column| column[i]).collect_vec(),
                 )

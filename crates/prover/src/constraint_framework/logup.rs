@@ -4,12 +4,13 @@ use itertools::Itertools;
 use num_traits::{One, Zero};
 
 use super::EvalAtRow;
+use crate::core::backend::cpu::bit_reverse;
 use crate::core::backend::simd::column::SecureColumn;
 use crate::core::backend::simd::m31::LOG_N_LANES;
 use crate::core::backend::simd::prefix_sum::inclusive_prefix_sum;
 use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
-use crate::core::backend::Column;
+use crate::core::backend::{Col, Column};
 use crate::core::channel::Channel;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
@@ -18,7 +19,10 @@ use crate::core::fields::FieldExpOps;
 use crate::core::lookups::utils::Fraction;
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation};
 use crate::core::poly::BitReversedOrder;
-use crate::core::utils::{bit_reverse_index, coset_index_to_circle_domain_index};
+use crate::core::utils::{
+    bit_reverse_index, circle_domain_order_to_coset_order, coset_index_to_circle_domain_index,
+    coset_order_to_circle_domain_order,
+};
 use crate::core::ColumnVec;
 
 /// Represents the value of the prefix sum column at some index.

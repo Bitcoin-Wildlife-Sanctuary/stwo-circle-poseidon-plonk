@@ -1,10 +1,15 @@
+use std::collections::HashMap;
 use std::ops::{Add, AddAssign, Mul, Sub};
 use num_traits::One;
 use crate::constraint_framework::{EvalAtRow, RelationEntry, PREPROCESSED_TRACE_IDX};
+use crate::core::backend::simd::SimdBackend;
+use crate::core::ColumnVec;
 use crate::core::fields::FieldExpOps;
 use crate::core::fields::m31::{BaseField, M31};
+use crate::core::poly::BitReversedOrder;
+use crate::core::poly::circle::CircleEvaluation;
 use crate::core::vcs::poseidon31_ref::{FIRST_FOUR_ROUND_RC, LAST_FOUR_ROUNDS_RC, PARTIAL_ROUNDS_RC};
-use crate::examples::poseidon::PoseidonElements;
+use crate::examples::poseidon::{LookupData, PoseidonElements};
 use crate::examples::xor::gkr_lookups::accumulation::DynMle::Base;
 
 const N_STATE: usize = 16;
@@ -197,4 +202,52 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(eval: &mut E, lookup_elements: &P
 
     // TODO: use higher degrees batching
     eval.finalize_logup_in_pairs();
+}
+
+pub struct PoseidonDataFlow(
+    pub HashMap<usize, [M31; 8]>,
+);
+
+pub struct PoseidonControlFlow {
+    pub addr_1: Vec<usize>,
+    pub addr_2: Vec<usize>,
+    pub addr_3: Vec<usize>,
+    pub addr_4: Vec<usize>,
+
+    pub sel_1: Vec<usize>,
+    pub sel_2: Vec<usize>,
+    pub sel_3: Vec<usize>,
+    pub sel_4: Vec<usize>,
+}
+
+pub struct PoseidonMetadata {
+    pub control_flow: PoseidonControlFlow,
+    pub data_flow: PoseidonDataFlow,
+    pub constant_1_addr: usize,
+    pub constant_1_sel: usize,
+    pub constant_2_addr: usize,
+    pub constant_2_sel: usize,
+    pub constant_3_addr: usize,
+    pub constant_3_sel: usize,
+}
+
+pub fn gen_trace(
+    metadata: &PoseidonMetadata,
+) -> (
+    ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
+    LookupData,
+) {
+    let control_flow = &metadata.control_flow;
+
+    // check the length
+    let len = control_flow.addr_1.len();
+    assert_eq!(len, control_flow.addr_2.len());
+    assert_eq!(len, control_flow.addr_3.len());
+    assert_eq!(len, control_flow.addr_4.len());
+    assert_eq!(len, control_flow.sel_1.len());
+    assert_eq!(len, control_flow.sel_2.len());
+    assert_eq!(len, control_flow.sel_3.len());
+    assert_eq!(len, control_flow.sel_4.len());
+
+    // compute the circuit size
 }

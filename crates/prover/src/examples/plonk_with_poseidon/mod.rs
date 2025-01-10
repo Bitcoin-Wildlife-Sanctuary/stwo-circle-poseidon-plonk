@@ -1,3 +1,3 @@
 mod air;
 
-mod poseidon;
+pub mod poseidon;

@@ -372,7 +372,7 @@ pub fn gen_trace(
         .resize(1 << log_size, metadata.constant_2_sel);
     control_flow
         .sel_4
-        .resize(1 << log_size, metadata.constant_3_addr);
+        .resize(1 << log_size, metadata.constant_3_sel);
 
     let _span = span!(Level::INFO, "Generation").entered();
     assert!(log_size >= LOG_N_LANES);
@@ -663,8 +663,6 @@ pub fn gen_interaction_trace(
     let _span = span!(Level::INFO, "Generate interaction trace").entered();
     let mut logup_gen = LogupTraceGenerator::new(log_size);
 
-    // addr_1,2,3,4 and val_1,2,3,4
-
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let addr_1 = PackedM31::from_array(std::array::from_fn(|i| {
@@ -768,7 +766,7 @@ pub fn gen_interaction_trace(
         let src_4: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
             let r = data_flow
                 .0
-                .get(&control_flow.sel_3[vec_row * N_LANES + i])
+                .get(&control_flow.sel_4[vec_row * N_LANES + i])
                 .unwrap();
             r.clone()
         });
@@ -838,7 +836,96 @@ pub fn check_interaction_trace(
             std::array::from_fn(|i| trace[4 + i].data[vec_row]);
         let input_state_2: [PackedBaseField; 8] =
             std::array::from_fn(|i| trace[12 + i].data[vec_row]);
+
+        let v1: PackedSecureField = lookup_elements.combine(&[
+            -sel_1,
+            input_state_1[0],
+            input_state_1[1],
+            input_state_1[2],
+            input_state_1[3],
+            input_state_1[4],
+            input_state_1[5],
+            input_state_1[6],
+            input_state_1[7],
+        ]);
+        input_sum += v1.inverse().pointwise_sum();
+
+        let v2: PackedSecureField = lookup_elements.combine(&[
+            -sel_2,
+            input_state_2[0],
+            input_state_2[1],
+            input_state_2[2],
+            input_state_2[3],
+            input_state_2[4],
+            input_state_2[5],
+            input_state_2[6],
+            input_state_2[7],
+        ]);
+        input_sum += v2.inverse().pointwise_sum();
     }
+
+    let mut output_sum = QM31::zero();
+    for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
+        let sel_3 = trace[2].data[vec_row];
+        let sel_4 = trace[3].data[vec_row];
+
+        let output_state_1: [PackedBaseField; 8] =
+            std::array::from_fn(|i| trace[146 + i].data[vec_row]);
+        let output_state_2: [PackedBaseField; 8] =
+            std::array::from_fn(|i| trace[154 + i].data[vec_row]);
+
+        let v1: PackedSecureField = lookup_elements.combine(&[
+            -sel_3,
+            output_state_1[0],
+            output_state_1[1],
+            output_state_1[2],
+            output_state_1[3],
+            output_state_1[4],
+            output_state_1[5],
+            output_state_1[6],
+            output_state_1[7],
+        ]);
+        output_sum += v1.inverse().pointwise_sum();
+
+        let v2: PackedSecureField = lookup_elements.combine(&[
+            -sel_4,
+            output_state_2[0],
+            output_state_2[1],
+            output_state_2[2],
+            output_state_2[3],
+            output_state_2[4],
+            output_state_2[5],
+            output_state_2[6],
+            output_state_2[7],
+        ]);
+        output_sum += v2.inverse().pointwise_sum();
+    }
+
+    assert_eq!(total_sum, addr_sel_sum + input_sum + output_sum);
+}
+
+pub fn gen_constant_trace(
+    metadata: &mut PoseidonMetadata,
+) -> ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>> {
+    let prescribed_flow = &metadata.prescribed_flow;
+    let log_n_rows = prescribed_flow.addr_1.len().ilog2();
+
+    [
+        prescribed_flow.addr_1.clone(),
+        prescribed_flow.addr_2.clone(),
+        prescribed_flow.addr_3.clone(),
+        prescribed_flow.addr_4.clone(),
+    ]
+    .into_iter()
+    .map(|col| {
+        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
+            CanonicCoset::new(log_n_rows).circle_domain(),
+            col.iter()
+                .map(|x| BaseField::from_u32_unchecked(*x as u32))
+                .collect(),
+        )
+    })
+    .collect()
 }
 
 #[cfg(test)]
@@ -848,7 +935,7 @@ mod tests {
     use crate::core::channel::Blake2sChannel;
     use crate::examples::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
     use crate::examples::plonk_with_poseidon::poseidon::{
-        check_interaction_trace, check_trace, gen_interaction_trace, gen_trace,
+        check_interaction_trace, check_trace, gen_constant_trace, gen_interaction_trace, gen_trace,
         PoseidonControlFlow, PoseidonDataFlow, PoseidonMetadata, PoseidonPrescribedFlow,
         CONSTANT_1, CONSTANT_2, CONSTANT_3,
     };
@@ -887,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn test_trace() {
+    fn test_poseidon_trace() {
         let mut metadata = get_test_metadata();
         let trace = gen_trace(&mut metadata);
         check_trace(&trace);
@@ -895,7 +982,9 @@ mod tests {
         let mut channel = Blake2sChannel::default();
         let lookup_elements = PlonkWithAcceleratorLookupElements::draw(&mut channel);
 
+        let constant = gen_constant_trace(&mut metadata);
+
         let (interaction, total_sum) = gen_interaction_trace(&mut metadata, &lookup_elements);
-        check_interaction_trace(&trace, &interaction, &lookup_elements, total_sum);
+        check_interaction_trace(&trace, &interaction, &constant, &lookup_elements, total_sum);
     }
 }

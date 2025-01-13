@@ -2,14 +2,17 @@ use std::collections::HashMap;
 use std::ops::{Add, AddAssign, Mul, Sub};
 
 use itertools::Itertools;
-use num_traits::One;
+use num_traits::{One, Zero};
 use tracing::{span, Level};
 
-use crate::constraint_framework::{EvalAtRow, RelationEntry, PREPROCESSED_TRACE_IDX};
+use crate::constraint_framework::logup::LogupTraceGenerator;
+use crate::constraint_framework::{EvalAtRow, Relation, RelationEntry, PREPROCESSED_TRACE_IDX};
 use crate::core::backend::simd::m31::{PackedBaseField, PackedM31, LOG_N_LANES, N_LANES};
+use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::{Col, Column};
 use crate::core::fields::m31::{BaseField, M31};
+use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::fields::FieldExpOps;
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation};
 use crate::core::poly::BitReversedOrder;
@@ -17,7 +20,7 @@ use crate::core::vcs::poseidon31_ref::{
     FIRST_FOUR_ROUND_RC, LAST_FOUR_ROUNDS_RC, MAT_DIAG16_M_1, PARTIAL_ROUNDS_RC,
 };
 use crate::core::ColumnVec;
-use crate::examples::plonk::PlonkLookupElements;
+use crate::examples::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
 
 const N_STATE: usize = 16;
 const N_HALF_FULL_ROUNDS: usize = 4;
@@ -122,7 +125,7 @@ fn pow5<F: FieldExpOps>(x: F) -> F {
 
 pub fn eval_poseidon_constraints<E: EvalAtRow>(
     eval: &mut E,
-    lookup_elements: &PlonkLookupElements,
+    lookup_elements: &PlonkWithAcceleratorLookupElements,
 ) {
     let [addr_1] = eval.next_interaction_mask(PREPROCESSED_TRACE_IDX, [0]);
     let [addr_2] = eval.next_interaction_mask(PREPROCESSED_TRACE_IDX, [0]);
@@ -224,49 +227,69 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
         &[addr_4, sel_4.clone()],
     ));
 
-    for i in 0..8 {
-        eval.add_to_relation(RelationEntry::new(
-            lookup_elements,
-            E::EF::one(),
-            &[
-                sel_1.clone() + E::F::from(BaseField::from(i).into()),
-                initial_state[i].clone(),
-            ],
-        ));
-    }
+    eval.add_to_relation(RelationEntry::new(
+        lookup_elements,
+        E::EF::one(),
+        &[
+            sel_1.clone(),
+            initial_state[0].clone(),
+            initial_state[1].clone(),
+            initial_state[2].clone(),
+            initial_state[3].clone(),
+            initial_state[4].clone(),
+            initial_state[5].clone(),
+            initial_state[6].clone(),
+            initial_state[7].clone(),
+        ],
+    ));
 
-    for i in 0..8 {
-        eval.add_to_relation(RelationEntry::new(
-            lookup_elements,
-            E::EF::one(),
-            &[
-                sel_2.clone() + E::F::from(BaseField::from(i).into()),
-                initial_state[i + 8].clone(),
-            ],
-        ))
-    }
+    eval.add_to_relation(RelationEntry::new(
+        lookup_elements,
+        E::EF::one(),
+        &[
+            sel_2.clone(),
+            initial_state[8].clone(),
+            initial_state[9].clone(),
+            initial_state[10].clone(),
+            initial_state[11].clone(),
+            initial_state[12].clone(),
+            initial_state[13].clone(),
+            initial_state[14].clone(),
+            initial_state[15].clone(),
+        ],
+    ));
 
-    for i in 0..8 {
-        eval.add_to_relation(RelationEntry::new(
-            lookup_elements,
-            E::EF::one(),
-            &[
-                sel_3.clone() + E::F::from(BaseField::from(i).into()),
-                state[i].clone(),
-            ],
-        ))
-    }
+    eval.add_to_relation(RelationEntry::new(
+        lookup_elements,
+        E::EF::one(),
+        &[
+            sel_3.clone(),
+            state[0].clone(),
+            state[1].clone(),
+            state[2].clone(),
+            state[3].clone(),
+            state[4].clone(),
+            state[5].clone(),
+            state[6].clone(),
+            state[7].clone(),
+        ],
+    ));
 
-    for i in 0..8 {
-        eval.add_to_relation(RelationEntry::new(
-            lookup_elements,
-            E::EF::one(),
-            &[
-                sel_4.clone() + E::F::from(BaseField::from(i).into()),
-                state[i + 8].clone(),
-            ],
-        ))
-    }
+    eval.add_to_relation(RelationEntry::new(
+        lookup_elements,
+        E::EF::one(),
+        &[
+            sel_4.clone(),
+            state[8].clone(),
+            state[9].clone(),
+            state[10].clone(),
+            state[11].clone(),
+            state[12].clone(),
+            state[13].clone(),
+            state[14].clone(),
+            state[15].clone(),
+        ],
+    ));
 
     // TODO: use higher degrees batching
     eval.finalize_logup_in_pairs();
@@ -605,13 +628,229 @@ pub fn check_trace(trace: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, Bi
     }
 }
 
+pub fn gen_interaction_trace(
+    metadata: &mut PoseidonMetadata,
+    lookup_elements: &PlonkWithAcceleratorLookupElements,
+) -> (
+    ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
+    SecureField,
+) {
+    let prescribed_flow = &mut metadata.prescribed_flow;
+    let control_flow = &mut metadata.control_flow;
+    let data_flow = &mut metadata.data_flow;
+
+    // check the length
+    let len = prescribed_flow.addr_1.len();
+    assert_eq!(len, prescribed_flow.addr_2.len());
+    assert_eq!(len, prescribed_flow.addr_3.len());
+    assert_eq!(len, prescribed_flow.addr_4.len());
+    assert_eq!(len, control_flow.sel_1.len());
+    assert_eq!(len, control_flow.sel_2.len());
+    assert_eq!(len, control_flow.sel_3.len());
+    assert_eq!(len, control_flow.sel_4.len());
+
+    // check the constants are given
+    assert!(data_flow.0.contains_key(&metadata.constant_1_sel));
+    assert!(data_flow.0.contains_key(&metadata.constant_2_sel));
+    assert!(data_flow.0.contains_key(&metadata.constant_3_sel));
+
+    // compute the circuit size
+    assert!(len.is_power_of_two());
+
+    let log_size = len.ilog2();
+    assert!(log_size >= LOG_N_LANES);
+
+    let _span = span!(Level::INFO, "Generate interaction trace").entered();
+    let mut logup_gen = LogupTraceGenerator::new(log_size);
+
+    // addr_1,2,3,4 and val_1,2,3,4
+
+    let mut col_gen = logup_gen.new_col();
+    for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
+        let addr_1 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(prescribed_flow.addr_1[vec_row * N_LANES + i] as u32)
+        }));
+        let sel_1 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_1[vec_row * N_LANES + i] as u32)
+        }));
+        let denom0: PackedSecureField = lookup_elements.combine(&[addr_1, sel_1]);
+
+        let addr_2 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(prescribed_flow.addr_2[vec_row * N_LANES + i] as u32)
+        }));
+        let sel_2 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_2[vec_row * N_LANES + i] as u32)
+        }));
+        let denom1: PackedSecureField = lookup_elements.combine(&[addr_2, sel_2]);
+
+        // (1 / denom1) + (1 / denom1) = (denom1 + denom0) / (denom0 * denom1).
+        col_gen.write_frac(vec_row, denom1 + denom0, denom0 * denom1);
+    }
+    col_gen.finalize_col();
+
+    let mut col_gen = logup_gen.new_col();
+    for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
+        let addr_3 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(prescribed_flow.addr_3[vec_row * N_LANES + i] as u32)
+        }));
+        let sel_3 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_3[vec_row * N_LANES + i] as u32)
+        }));
+        let denom0: PackedSecureField = lookup_elements.combine(&[addr_3, sel_3]);
+
+        let addr_4 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(prescribed_flow.addr_4[vec_row * N_LANES + i] as u32)
+        }));
+        let sel_4 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_4[vec_row * N_LANES + i] as u32)
+        }));
+        let denom1: PackedSecureField = lookup_elements.combine(&[addr_4, sel_4]);
+
+        // (1 / denom1) + (1 / denom1) = (denom1 + denom0) / (denom0 * denom1).
+        col_gen.write_frac(vec_row, denom1 + denom0, denom0 * denom1);
+    }
+    col_gen.finalize_col();
+
+    let mut col_gen = logup_gen.new_col();
+    for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
+        let sel_1 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_1[vec_row * N_LANES + i] as u32)
+        }));
+        let sel_2 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_2[vec_row * N_LANES + i] as u32)
+        }));
+        let src_1: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
+            let r = data_flow
+                .0
+                .get(&control_flow.sel_1[vec_row * N_LANES + i])
+                .unwrap();
+            r.clone()
+        });
+        let src_2: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
+            let r = data_flow
+                .0
+                .get(&control_flow.sel_2[vec_row * N_LANES + i])
+                .unwrap();
+            r.clone()
+        });
+        let mut denom0_arr = Vec::with_capacity(9);
+        denom0_arr.push(-sel_1);
+        for j in 0..8 {
+            denom0_arr.push(PackedM31::from_array(std::array::from_fn(|i| src_1[i][j])));
+        }
+        let denom0: PackedSecureField = lookup_elements.combine(&denom0_arr);
+        let mut denom1_arr = Vec::with_capacity(9);
+        denom1_arr.push(-sel_2);
+        for j in 0..8 {
+            denom1_arr.push(PackedM31::from_array(std::array::from_fn(|i| src_2[i][j])));
+        }
+        let denom1: PackedSecureField = lookup_elements.combine(&denom1_arr);
+        // (1 / denom1) + (1 / denom1) = (denom1 + denom0) / (denom0 * denom1).
+        col_gen.write_frac(vec_row, denom1 + denom0, denom0 * denom1);
+    }
+    col_gen.finalize_col();
+
+    let mut col_gen = logup_gen.new_col();
+    for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
+        let sel_3 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_3[vec_row * N_LANES + i] as u32)
+        }));
+        let sel_4 = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_4[vec_row * N_LANES + i] as u32)
+        }));
+        let src_3: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
+            let r = data_flow
+                .0
+                .get(&control_flow.sel_3[vec_row * N_LANES + i])
+                .unwrap();
+            r.clone()
+        });
+        let src_4: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
+            let r = data_flow
+                .0
+                .get(&control_flow.sel_3[vec_row * N_LANES + i])
+                .unwrap();
+            r.clone()
+        });
+        let mut denom0_arr = Vec::with_capacity(9);
+        denom0_arr.push(-sel_3);
+        for j in 0..8 {
+            denom0_arr.push(PackedM31::from_array(std::array::from_fn(|i| src_3[i][j])));
+        }
+        let denom0: PackedSecureField = lookup_elements.combine(&denom0_arr);
+        let mut denom1_arr = Vec::with_capacity(9);
+        denom1_arr.push(-sel_4);
+        for j in 0..8 {
+            denom1_arr.push(PackedM31::from_array(std::array::from_fn(|i| src_4[i][j])));
+        }
+        let denom1: PackedSecureField = lookup_elements.combine(&denom1_arr);
+        // (1 / denom1) + (1 / denom1) = (denom1 + denom0) / (denom0 * denom1).
+        col_gen.write_frac(vec_row, denom1 + denom0, denom0 * denom1);
+    }
+    col_gen.finalize_col();
+
+    logup_gen.finalize_last()
+}
+
+pub fn check_interaction_trace(
+    trace: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
+    interaction: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
+    constant: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
+    lookup_elements: &PlonkWithAcceleratorLookupElements,
+    total_sum: SecureField,
+) {
+    assert_eq!(trace.len(), N_COLUMNS);
+    assert_eq!(interaction.len(), (4 + 4) / 2 * 4);
+
+    let mut addr_sel_sum = QM31::zero();
+
+    let log_size = trace[0].length.ilog2();
+    for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
+        let addr_1 = constant[0].data[vec_row];
+        let addr_2 = constant[1].data[vec_row];
+        let addr_3 = constant[2].data[vec_row];
+        let addr_4 = constant[3].data[vec_row];
+
+        let sel_1 = trace[0].data[vec_row];
+        let sel_2 = trace[1].data[vec_row];
+        let sel_3 = trace[2].data[vec_row];
+        let sel_4 = trace[3].data[vec_row];
+
+        let v1: PackedSecureField = lookup_elements.combine(&[addr_1, sel_1]);
+        addr_sel_sum += v1.inverse().pointwise_sum();
+
+        let v2: PackedSecureField = lookup_elements.combine(&[addr_2, sel_2]);
+        addr_sel_sum += v2.inverse().pointwise_sum();
+
+        let v3: PackedSecureField = lookup_elements.combine(&[addr_3, sel_3]);
+        addr_sel_sum += v3.inverse().pointwise_sum();
+
+        let v4: PackedSecureField = lookup_elements.combine(&[addr_4, sel_4]);
+        addr_sel_sum += v4.inverse().pointwise_sum();
+    }
+
+    let mut input_sum = QM31::zero();
+    for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
+        let sel_1 = trace[0].data[vec_row];
+        let sel_2 = trace[1].data[vec_row];
+
+        let input_state_1: [PackedBaseField; 8] =
+            std::array::from_fn(|i| trace[4 + i].data[vec_row]);
+        let input_state_2: [PackedBaseField; 8] =
+            std::array::from_fn(|i| trace[12 + i].data[vec_row]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
+    use crate::core::channel::Blake2sChannel;
+    use crate::examples::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
     use crate::examples::plonk_with_poseidon::poseidon::{
-        check_trace, gen_trace, PoseidonControlFlow, PoseidonDataFlow, PoseidonMetadata,
-        PoseidonPrescribedFlow, CONSTANT_1, CONSTANT_2, CONSTANT_3,
+        check_interaction_trace, check_trace, gen_interaction_trace, gen_trace,
+        PoseidonControlFlow, PoseidonDataFlow, PoseidonMetadata, PoseidonPrescribedFlow,
+        CONSTANT_1, CONSTANT_2, CONSTANT_3,
     };
 
     fn get_test_metadata() -> PoseidonMetadata {
@@ -652,5 +891,11 @@ mod tests {
         let mut metadata = get_test_metadata();
         let trace = gen_trace(&mut metadata);
         check_trace(&trace);
+
+        let mut channel = Blake2sChannel::default();
+        let lookup_elements = PlonkWithAcceleratorLookupElements::draw(&mut channel);
+
+        let (interaction, total_sum) = gen_interaction_trace(&mut metadata, &lookup_elements);
+        check_interaction_trace(&trace, &interaction, &lookup_elements, total_sum);
     }
 }

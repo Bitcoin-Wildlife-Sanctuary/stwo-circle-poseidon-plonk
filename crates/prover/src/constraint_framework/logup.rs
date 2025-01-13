@@ -4,12 +4,13 @@ use itertools::Itertools;
 use num_traits::{One, Zero};
 
 use super::EvalAtRow;
+use crate::core::backend::cpu::bit_reverse;
 use crate::core::backend::simd::column::SecureColumn;
 use crate::core::backend::simd::m31::LOG_N_LANES;
 use crate::core::backend::simd::prefix_sum::inclusive_prefix_sum;
 use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
-use crate::core::backend::Column;
+use crate::core::backend::{Col, Column};
 use crate::core::channel::Channel;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
@@ -18,7 +19,10 @@ use crate::core::fields::FieldExpOps;
 use crate::core::lookups::utils::Fraction;
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation};
 use crate::core::poly::BitReversedOrder;
-use crate::core::utils::{bit_reverse_index, coset_index_to_circle_domain_index};
+use crate::core::utils::{
+    bit_reverse_index, circle_domain_order_to_coset_order, coset_index_to_circle_domain_index,
+    coset_order_to_circle_domain_order,
+};
 use crate::core::ColumnVec;
 
 /// Represents the value of the prefix sum column at some index.
@@ -194,6 +198,18 @@ impl LogupTraceGenerator {
         (trace, total_sum)
     }
 
+    /// Finalize the trace. Returns the trace and the total sum of the last column.
+    pub fn finalize_last_canonical(
+        self,
+    ) -> (
+        ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
+        SecureField,
+    ) {
+        let log_size = self.log_size;
+        let (trace, [total_sum]) = self.finalize_at_canonical([(1 << log_size) - 1]);
+        (trace, total_sum)
+    }
+
     /// Finalize the trace. Returns the trace and the prefix sum of the last column at
     /// the corresponding `indices`.
     pub fn finalize_at<const N: usize>(
@@ -225,6 +241,51 @@ impl LogupTraceGenerator {
             .flat_map(|eval| {
                 eval.columns.map(|col| {
                     CircleEvaluation::new(CanonicCoset::new(self.log_size).circle_domain(), col)
+                })
+            })
+            .collect_vec();
+        (trace, returned_prefix_sums)
+    }
+
+    /// Finalize the trace. Returns the trace and the prefix sum of the last column at
+    /// the corresponding `indices`.
+    pub fn finalize_at_canonical<const N: usize>(
+        mut self,
+        indices: [usize; N],
+    ) -> (
+        ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
+        [SecureField; N],
+    ) {
+        // Prefix sum the last column.
+        let last_col_coords = self.trace.pop().unwrap().columns;
+
+        fn inclusive_prefix_sum_canonical(
+            circle_domain_evals: Col<SimdBackend, BaseField>,
+        ) -> Col<SimdBackend, BaseField> {
+            let mut circle_order_eval = circle_domain_evals.into_cpu_vec();
+            bit_reverse(&mut circle_order_eval);
+            let coset_order_eval = circle_domain_order_to_coset_order(&circle_order_eval);
+
+            let coset_order_sum = inclusive_prefix_sum(coset_order_eval.into_iter().collect());
+            let mut circle_order_sum =
+                coset_order_to_circle_domain_order(&coset_order_sum.into_cpu_vec());
+            bit_reverse(&mut circle_order_sum);
+            circle_order_sum.into_iter().collect()
+        }
+
+        let coord_prefix_sum = last_col_coords.map(inclusive_prefix_sum_canonical);
+        let secure_prefix_sum = SecureColumnByCoords {
+            columns: coord_prefix_sum,
+        };
+        let returned_prefix_sums = indices.map(|idx| secure_prefix_sum.at(idx));
+        self.trace.push(secure_prefix_sum);
+
+        let trace = self
+            .trace
+            .into_iter()
+            .flat_map(|eval| {
+                eval.columns.map(|col| {
+                    CircleEvaluation::new_canonical_ordered(CanonicCoset::new(self.log_size), col)
                 })
             })
             .collect_vec();

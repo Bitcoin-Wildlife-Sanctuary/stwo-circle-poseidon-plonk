@@ -1,10 +1,328 @@
-use crate::examples::plonk_with_poseidon::plonk::PlonkWithAcceleratorComponent;
-use crate::examples::plonk_with_poseidon::poseidon::PoseidonAcceleratorComponent;
+use std::cmp::max;
+
+use itertools::{chain, Itertools};
+use num_traits::{One, Zero};
+use serde::Serialize;
+use tracing::{span, Level};
+
+use crate::constraint_framework::preprocessed_columns::{gen_is_first, PreprocessedColumn};
+use crate::constraint_framework::{
+    Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX,
+    PREPROCESSED_TRACE_IDX,
+};
+use crate::core::air::{Component, ComponentProver};
+use crate::core::backend::simd::m31::LOG_N_LANES;
+use crate::core::backend::simd::SimdBackend;
+use crate::core::backend::BackendForChannel;
+use crate::core::channel::{Channel, MerkleChannel};
+use crate::core::fields::m31::M31;
+use crate::core::fields::qm31::SecureField;
+use crate::core::fields::FieldExpOps;
+use crate::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, PcsConfig, TreeVec};
+use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
+use crate::core::poly::BitReversedOrder;
+use crate::core::prover::{prove, verify, StarkProof, VerificationError};
+use crate::core::vcs::ops::MerkleHasher;
+use crate::examples::plonk_with_poseidon::plonk::{
+    PlonkWithAcceleratorCircuitTrace, PlonkWithAcceleratorComponent, PlonkWithAcceleratorEval,
+    PlonkWithAcceleratorLookupElements,
+};
+use crate::examples::plonk_with_poseidon::poseidon::{
+    check_interaction_trace, check_trace, PoseidonAcceleratorComponent, PoseidonAcceleratorEval,
+    PoseidonMetadata,
+};
+use crate::examples::plonk_with_poseidon::{plonk, poseidon};
+
+#[derive(Serialize)]
+pub struct PlonkWithPoseidonStatement0 {
+    log_size_plonk: u32,
+    log_size_poseidon: u32,
+}
+
+impl PlonkWithPoseidonStatement0 {
+    fn log_sizes(&self) -> TreeVec<Vec<u32>> {
+        let mut sizes = TreeVec::new(vec![vec![], vec![], vec![]]);
+
+        let log_size_plonk = self.log_size_plonk;
+        let log_size_poseidon = self.log_size_poseidon;
+
+        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 7]);
+        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 5]);
+
+        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 3]);
+        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 162]);
+
+        sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_plonk; 8]);
+        sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 16]);
+
+        sizes
+    }
+
+    fn mix_into(&self, channel: &mut impl Channel) {
+        channel.mix_u64(self.log_size_plonk as u64);
+        channel.mix_u64(self.log_size_poseidon as u64);
+    }
+}
+
+pub struct PlonkWithPoseidonStatement1 {
+    pub plonk_total_sum: SecureField,
+    pub poseidon_total_sum: SecureField,
+}
+
+impl PlonkWithPoseidonStatement1 {
+    fn mix_into(&self, channel: &mut impl Channel) {
+        channel.mix_felts(&[self.plonk_total_sum, self.poseidon_total_sum]);
+    }
+}
+
+#[allow(unused)]
+pub struct PlonkWithPoseidonProof<H: MerkleHasher> {
+    stmt0: PlonkWithPoseidonStatement0,
+    stmt1: PlonkWithPoseidonStatement1,
+    stark_proof: StarkProof<H>,
+}
 
 #[allow(unused)]
 pub struct PlonkWithPoseidonComponents {
     pub plonk: PlonkWithAcceleratorComponent,
     pub poseidon: PoseidonAcceleratorComponent,
+}
+
+#[allow(unused)]
+impl PlonkWithPoseidonComponents {
+    fn new(
+        stmt0: &PlonkWithPoseidonStatement0,
+        lookup_elements: &PlonkWithAcceleratorLookupElements,
+        stmt1: &PlonkWithPoseidonStatement1,
+    ) -> Self {
+        let tree_span_provider = &mut TraceLocationAllocator::new_with_preproccessed_columns(
+            &chain!(
+                [
+                    PreprocessedColumn::Plonk(0),
+                    PreprocessedColumn::Plonk(1),
+                    PreprocessedColumn::Plonk(2),
+                    PreprocessedColumn::Plonk(3),
+                    PreprocessedColumn::Plonk(4),
+                    PreprocessedColumn::Plonk(5),
+                    PreprocessedColumn::IsFirst(stmt0.log_size_plonk as u32),
+                ],
+                [
+                    PreprocessedColumn::Poseidon(0),
+                    PreprocessedColumn::Poseidon(1),
+                    PreprocessedColumn::Poseidon(2),
+                    PreprocessedColumn::Poseidon(3),
+                    PreprocessedColumn::IsFirst(stmt0.log_size_poseidon as u32),
+                ]
+            )
+            .collect_vec()[..],
+        );
+
+        Self {
+            plonk: PlonkWithAcceleratorComponent::new(
+                tree_span_provider,
+                PlonkWithAcceleratorEval {
+                    log_n_rows: stmt0.log_size_plonk as u32,
+                    lookup_elements: lookup_elements.clone(),
+                    total_sum: stmt1.plonk_total_sum,
+                },
+                (stmt1.plonk_total_sum, None),
+            ),
+            poseidon: PoseidonAcceleratorComponent::new(
+                tree_span_provider,
+                PoseidonAcceleratorEval {
+                    log_n_rows: stmt0.log_size_poseidon as u32,
+                    lookup_elements: lookup_elements.clone(),
+                    total_sum: stmt1.poseidon_total_sum,
+                },
+                (stmt1.poseidon_total_sum, None),
+            ),
+        }
+    }
+
+    fn components(&self) -> Vec<&dyn Component> {
+        vec![
+            &self.plonk as &dyn Component,
+            &self.poseidon as &dyn Component,
+        ]
+    }
+
+    fn component_provers(&self) -> Vec<&dyn ComponentProver<SimdBackend>> {
+        vec![
+            &self.plonk as &dyn ComponentProver<SimdBackend>,
+            &self.poseidon as &dyn ComponentProver<SimdBackend>,
+        ]
+    }
+}
+
+pub fn prove_plonk_with_poseidon<MC: MerkleChannel>(
+    log_size_plonk: u32,
+    log_size_poseidon: u32,
+    config: PcsConfig,
+    circuit: &PlonkWithAcceleratorCircuitTrace,
+    metadata: &mut PoseidonMetadata,
+) -> PlonkWithPoseidonProof<MC::H>
+where
+    SimdBackend: BackendForChannel<MC>,
+{
+    assert!(log_size_plonk >= LOG_N_LANES);
+    assert!(log_size_poseidon >= LOG_N_LANES);
+    assert_eq!(circuit.mult.length, 1 << log_size_plonk);
+    assert_eq!(
+        metadata.prescribed_flow.addr_1.len(),
+        1 << log_size_poseidon
+    );
+
+    // Precompute twiddles.
+    let span = span!(Level::INFO, "Precompute twiddles").entered();
+    let log_max_rows = max(log_size_plonk + 1, log_size_poseidon + 2);
+    let twiddles = SimdBackend::precompute_twiddles(
+        CanonicCoset::new(log_max_rows + config.fri_config.log_blowup_factor)
+            .circle_domain()
+            .half_coset,
+    );
+    span.exit();
+
+    // Setup protocol.
+    let channel = &mut MC::C::default();
+    let mut commitment_scheme = CommitmentSchemeProver::new(config, &twiddles);
+
+    // Preprocessed trace
+    let is_first = gen_is_first(log_size_plonk);
+    let mut plonk_constant_trace = [
+        circuit.a_wire.clone(),
+        circuit.b_wire.clone(),
+        circuit.c_wire.clone(),
+        circuit.op.clone(),
+        circuit.mult.clone(),
+        circuit.mult_poseidon.clone(),
+    ]
+    .into_iter()
+    .map(|col| {
+        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new_canonical_ordered(
+            CanonicCoset::new(log_size_plonk),
+            col,
+        )
+    })
+    .collect_vec();
+    plonk_constant_trace.push(is_first);
+
+    let poseidon_trace = poseidon::gen_trace(metadata);
+    check_trace(&poseidon_trace);
+    let poseidon_constant_trace = poseidon::gen_constant_trace(metadata);
+
+    // Preprocessed trace.
+    let span = span!(Level::INFO, "Constant").entered();
+    let mut tree_builder = commitment_scheme.tree_builder();
+    tree_builder.extend_evals(chain![
+        plonk_constant_trace,
+        poseidon_constant_trace.clone(),
+    ]);
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Trace.
+    let span = span!(Level::INFO, "Trace").entered();
+    let plonk_trace = plonk::gen_trace(log_size_plonk, &circuit);
+
+    // Statement0.
+    let stmt0 = PlonkWithPoseidonStatement0 {
+        log_size_plonk,
+        log_size_poseidon,
+    };
+    stmt0.mix_into(channel);
+
+    let mut tree_builder = commitment_scheme.tree_builder();
+    tree_builder.extend_evals(chain![plonk_trace, poseidon_trace.clone()]);
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Draw lookup element.
+    let lookup_elements = PlonkWithAcceleratorLookupElements::draw(channel);
+
+    // Interaction trace.
+    let span = span!(Level::INFO, "Interaction").entered();
+    let (plonk_interaction_trace, plonk_total_sum) =
+        plonk::gen_interaction_trace(log_size_plonk, &circuit, &lookup_elements);
+    let (poseidon_interaction_trace, poseidon_total_sum) =
+        poseidon::gen_interaction_trace(metadata, &lookup_elements);
+    check_interaction_trace(
+        &poseidon_trace,
+        &poseidon_interaction_trace,
+        &poseidon_constant_trace,
+        &lookup_elements,
+        poseidon_total_sum,
+    );
+    let mut tree_builder = commitment_scheme.tree_builder();
+    tree_builder.extend_evals(chain![plonk_interaction_trace, poseidon_interaction_trace]);
+    // Statement1.
+    let stmt1 = PlonkWithPoseidonStatement1 {
+        plonk_total_sum,
+        poseidon_total_sum,
+    };
+    stmt1.mix_into(channel);
+    tree_builder.commit(channel);
+    span.exit();
+
+    assert_eq!(
+        commitment_scheme
+            .polynomials()
+            .as_cols_ref()
+            .map_cols(|c| c.log_size())
+            .0,
+        stmt0.log_sizes().0
+    );
+
+    // Prove constraints.
+    let components = PlonkWithPoseidonComponents::new(&stmt0, &lookup_elements, &stmt1);
+    let stark_proof = prove(&components.component_provers(), channel, commitment_scheme).unwrap();
+
+    PlonkWithPoseidonProof {
+        stmt0,
+        stmt1,
+        stark_proof,
+    }
+}
+
+#[allow(unused)]
+pub fn verify_plonk_with_poseidon<MC: MerkleChannel>(
+    PlonkWithPoseidonProof {
+        stmt0,
+        stmt1,
+        stark_proof,
+    }: PlonkWithPoseidonProof<MC::H>,
+    config: PcsConfig,
+) -> Result<(), VerificationError> {
+    let channel = &mut MC::C::default();
+    let commitment_scheme = &mut CommitmentSchemeVerifier::<MC>::new(config);
+
+    let log_sizes = stmt0.log_sizes();
+
+    // Preprocessed trace.
+    commitment_scheme.commit(stark_proof.commitments[0], &log_sizes[0], channel);
+
+    // Trace.
+    stmt0.mix_into(channel);
+    commitment_scheme.commit(stark_proof.commitments[1], &log_sizes[1], channel);
+
+    // Draw interaction elements.
+    let lookup_elements = PlonkWithAcceleratorLookupElements::draw(channel);
+
+    // Interaction trace.
+    stmt1.mix_into(channel);
+    commitment_scheme.commit(stark_proof.commitments[2], &log_sizes[2], channel);
+
+    let components = PlonkWithPoseidonComponents::new(&stmt0, &lookup_elements, &stmt1);
+    let one_sum: SecureField = lookup_elements.combine(&[M31::one(), M31::one()]);
+
+    let total_sum = stmt1.plonk_total_sum - one_sum.inverse() + stmt1.poseidon_total_sum;
+    assert_eq!(total_sum, SecureField::zero());
+
+    verify(
+        &components.components(),
+        channel,
+        commitment_scheme,
+        stark_proof,
+    )
 }
 
 #[cfg(test)]
@@ -20,6 +338,9 @@ mod test {
     use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
     use crate::core::prover::verify;
     use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+    use crate::examples::plonk_with_poseidon::air::{
+        prove_plonk_with_poseidon, verify_plonk_with_poseidon,
+    };
     use crate::examples::plonk_with_poseidon::plonk::{
         prove_plonk_with_accelerator, PlonkWithAcceleratorCircuitTrace,
         PlonkWithAcceleratorLookupElements,
@@ -171,9 +492,9 @@ mod test {
             cur_idx += 1;
         }
 
-        // assume that Poseidon has 16 gates,
-        // 8 of them will be dealing with CONSTANT_1, _2, _3
-        // 8 of them will be dealing with TEST_1, _2, _3, _4
+        // assume that Poseidon has 32 gates,
+        // 16 of them will be dealing with CONSTANT_1, _2, _3
+        // 16 of them will be dealing with TEST_1, _2, _3, _4
         mult[addr_hash_idx[0]] += 16;
         mult[addr_hash_idx[1]] += 16;
         mult[addr_hash_idx[2]] += 16;
@@ -336,6 +657,27 @@ mod test {
             }
         }
 
+        let mut counts_poseidon = HashMap::<usize, isize>::new();
+        for (i, &v) in mult_poseidon.iter().enumerate() {
+            counts_poseidon.insert(i, v as isize);
+        }
+        for r in [
+            &metadata.control_flow.sel_1,
+            &metadata.control_flow.sel_2,
+            &metadata.control_flow.sel_3,
+            &metadata.control_flow.sel_4,
+        ]
+        .iter()
+        {
+            for &v in r.iter() {
+                let p = counts_poseidon.get(&v).unwrap();
+                counts_poseidon.insert(v, *p - 1);
+            }
+        }
+        for (_, &v) in counts_poseidon.iter() {
+            assert!(v.is_zero());
+        }
+
         (circuit, metadata)
     }
 
@@ -416,5 +758,23 @@ mod test {
             )
             .unwrap();
         }
+    }
+
+    #[test]
+    fn test_joint_proof() {
+        let (plonk, mut poseidon) = generate_test_circuit();
+        let config = PcsConfig {
+            pow_bits: 10,
+            fri_config: FriConfig::new(2, 4, 64),
+        };
+
+        let proof = prove_plonk_with_poseidon::<Blake2sMerkleChannel>(
+            plonk.mult.length.ilog2(),
+            poseidon.control_flow.sel_1.len().ilog2(),
+            config,
+            &plonk,
+            &mut poseidon,
+        );
+        verify_plonk_with_poseidon::<Blake2sMerkleChannel>(proof, config).unwrap();
     }
 }

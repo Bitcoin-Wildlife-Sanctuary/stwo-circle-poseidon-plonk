@@ -21,7 +21,7 @@ use crate::core::channel::MerkleChannel;
 use crate::core::fields::m31::{BaseField, M31};
 use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::fields::FieldExpOps;
-use crate::core::pcs::{CommitmentSchemeProver, PcsConfig, TreeSubspan};
+use crate::core::pcs::{CommitmentSchemeProver, PcsConfig};
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
 use crate::core::poly::BitReversedOrder;
 use crate::core::prover::{prove, StarkProof};
@@ -68,9 +68,6 @@ pub struct PoseidonAcceleratorEval {
     pub log_n_rows: u32,
     pub lookup_elements: PlonkWithAcceleratorLookupElements,
     pub total_sum: SecureField,
-    pub base_trace_location: TreeSubspan,
-    pub interaction_trace_location: TreeSubspan,
-    pub constants_trace_location: TreeSubspan,
 }
 
 impl FrameworkEval for PoseidonAcceleratorEval {
@@ -1005,14 +1002,14 @@ where
     // Preprocessed trace.
     let span = span!(Level::INFO, "Constant").entered();
     let mut tree_builder = commitment_scheme.tree_builder();
-    let constants_trace_location = tree_builder.extend_evals(constant_trace.clone());
+    tree_builder.extend_evals(constant_trace.clone());
     tree_builder.commit(channel);
     span.exit();
 
     // Trace.
     let span = span!(Level::INFO, "Trace").entered();
     let mut tree_builder = commitment_scheme.tree_builder();
-    let base_trace_location = tree_builder.extend_evals(trace.clone());
+    tree_builder.extend_evals(trace.clone());
     tree_builder.commit(channel);
     span.exit();
 
@@ -1030,7 +1027,7 @@ where
         total_sum,
     );
     let mut tree_builder = commitment_scheme.tree_builder();
-    let interaction_trace_location = tree_builder.extend_evals(interaction_trace);
+    tree_builder.extend_evals(interaction_trace);
     tree_builder.commit(channel);
     span.exit();
 
@@ -1041,9 +1038,6 @@ where
             log_n_rows,
             lookup_elements,
             total_sum,
-            base_trace_location,
-            interaction_trace_location,
-            constants_trace_location,
         },
         (total_sum, None),
     );

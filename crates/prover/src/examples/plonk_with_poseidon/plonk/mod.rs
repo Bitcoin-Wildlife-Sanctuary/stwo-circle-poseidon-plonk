@@ -4,10 +4,10 @@ use itertools::Itertools;
 use num_traits::One;
 use tracing::{span, Level};
 
-use crate::constraint_framework::logup::{LogupTraceGenerator, LookupElements};
+use crate::constraint_framework::logup::LogupTraceGenerator;
 use crate::constraint_framework::preprocessed_columns::{gen_is_first, PreprocessedColumn};
 use crate::constraint_framework::{
-    assert_constraints, EvalAtRow, FrameworkComponent, FrameworkEval, RelationEntry,
+    assert_constraints, EvalAtRow, FrameworkComponent, FrameworkEval, Relation, RelationEntry,
     TraceLocationAllocator, ORIGINAL_TRACE_IDX,
 };
 use crate::core::backend::simd::column::BaseColumn;
@@ -18,7 +18,7 @@ use crate::core::backend::{BackendForChannel, Column};
 use crate::core::channel::MerkleChannel;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
-use crate::core::pcs::{CommitmentSchemeProver, PcsConfig, TreeSubspan};
+use crate::core::pcs::{CommitmentSchemeProver, PcsConfig};
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
 use crate::core::poly::BitReversedOrder;
 use crate::core::prover::{prove, StarkProof};
@@ -34,9 +34,6 @@ pub struct PlonkWithAcceleratorEval {
     pub log_n_rows: u32,
     pub lookup_elements: PlonkWithAcceleratorLookupElements,
     pub total_sum: SecureField,
-    pub base_trace_location: TreeSubspan,
-    pub interaction_trace_location: TreeSubspan,
-    pub constants_trace_location: TreeSubspan,
 }
 
 impl FrameworkEval for PlonkWithAcceleratorEval {
@@ -87,7 +84,7 @@ impl FrameworkEval for PlonkWithAcceleratorEval {
 
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
-            mult_poseidon.into(),
+            (-mult_poseidon).into(),
             &[
                 -c_wire.clone(),
                 c_vals[0].clone(),
@@ -134,7 +131,7 @@ pub fn gen_trace(
 pub fn gen_interaction_trace(
     log_size: u32,
     circuit: &PlonkWithAcceleratorCircuitTrace,
-    lookup_elements: &LookupElements<9>,
+    lookup_elements: &PlonkWithAcceleratorLookupElements,
 ) -> (
     ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
     SecureField,
@@ -158,7 +155,7 @@ pub fn gen_interaction_trace(
         let q0: PackedSecureField =
             lookup_elements.combine(&[circuit.c_wire.data[vec_row], circuit.c_val.data[vec_row]]);
 
-        let p1 = circuit.mult_poseidon.data[vec_row];
+        let p1 = -circuit.mult_poseidon.data[vec_row];
 
         let mut c_val_and_shifted_ones = Vec::with_capacity(9);
         c_val_and_shifted_ones.push(-circuit.c_wire.data[vec_row]);
@@ -232,7 +229,7 @@ where
     })
     .collect_vec();
     constant_trace.push(is_first);
-    let constants_trace_location = tree_builder.extend_evals(constant_trace);
+    tree_builder.extend_evals(constant_trace);
     tree_builder.commit(channel);
     span.exit();
 
@@ -240,7 +237,7 @@ where
     let span = span!(Level::INFO, "Trace").entered();
     let trace = gen_trace(log_n_rows, &circuit);
     let mut tree_builder = commitment_scheme.tree_builder();
-    let base_trace_location = tree_builder.extend_evals(trace);
+    tree_builder.extend_evals(trace);
     tree_builder.commit(channel);
     span.exit();
 
@@ -249,9 +246,9 @@ where
 
     // Interaction trace.
     let span = span!(Level::INFO, "Interaction").entered();
-    let (trace, total_sum) = gen_interaction_trace(log_n_rows, &circuit, &lookup_elements.0);
+    let (trace, total_sum) = gen_interaction_trace(log_n_rows, &circuit, &lookup_elements);
     let mut tree_builder = commitment_scheme.tree_builder();
-    let interaction_trace_location = tree_builder.extend_evals(trace);
+    tree_builder.extend_evals(trace);
     tree_builder.commit(channel);
     span.exit();
     // Prove constraints.
@@ -261,9 +258,6 @@ where
             log_n_rows,
             lookup_elements,
             total_sum,
-            base_trace_location,
-            interaction_trace_location,
-            constants_trace_location,
         },
         (total_sum, None),
     );

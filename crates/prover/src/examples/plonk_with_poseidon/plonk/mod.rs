@@ -188,7 +188,7 @@ pub fn gen_interaction_trace(
 }
 
 #[allow(unused)]
-pub fn prove_fibonacci_plonk2(
+pub fn prove_fibonacci_plonk_with_accelerator(
     log_n_rows: u32,
     config: PcsConfig,
 ) -> (
@@ -319,7 +319,7 @@ mod tests {
     use crate::core::prover::verify;
     use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use crate::examples::plonk_with_poseidon::plonk::{
-        prove_fibonacci_plonk2, PlonkWithAcceleratorLookupElements,
+        prove_fibonacci_plonk_with_accelerator, PlonkWithAcceleratorLookupElements,
     };
 
     #[test_log::test]
@@ -335,7 +335,7 @@ mod tests {
         };
 
         // Prove.
-        let (component, proof) = prove_fibonacci_plonk2(log_n_instances, config);
+        let (component, proof) = prove_fibonacci_plonk_with_accelerator(log_n_instances, config);
 
         // Verify.
         // TODO: Create Air instance independently.

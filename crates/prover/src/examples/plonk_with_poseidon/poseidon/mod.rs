@@ -3,19 +3,29 @@ use std::ops::{Add, AddAssign, Mul, Sub};
 
 use itertools::Itertools;
 use num_traits::{One, Zero};
+use rand::rngs::SmallRng;
+use rand::{Rng, SeedableRng};
 use tracing::{span, Level};
 
 use crate::constraint_framework::logup::LogupTraceGenerator;
-use crate::constraint_framework::{EvalAtRow, Relation, RelationEntry, PREPROCESSED_TRACE_IDX};
+use crate::constraint_framework::preprocessed_columns::{gen_is_first, PreprocessedColumn};
+use crate::constraint_framework::{
+    assert_constraints, EvalAtRow, FrameworkComponent, FrameworkEval, Relation, RelationEntry,
+    TraceLocationAllocator,
+};
 use crate::core::backend::simd::m31::{PackedBaseField, PackedM31, LOG_N_LANES, N_LANES};
 use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::{Col, Column};
+use crate::core::channel::Blake2sChannel;
 use crate::core::fields::m31::{BaseField, M31};
 use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::fields::FieldExpOps;
-use crate::core::poly::circle::{CanonicCoset, CircleEvaluation};
+use crate::core::pcs::{CommitmentSchemeProver, PcsConfig};
+use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
 use crate::core::poly::BitReversedOrder;
+use crate::core::prover::{prove, StarkProof};
+use crate::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
 use crate::core::vcs::poseidon31_ref::{
     FIRST_FOUR_ROUND_RC, LAST_FOUR_ROUNDS_RC, MAT_DIAG16_M_1, PARTIAL_ROUNDS_RC,
 };
@@ -27,6 +37,7 @@ const N_HALF_FULL_ROUNDS: usize = 4;
 const N_PARTIAL_ROUNDS: usize = 14;
 const FULL_ROUNDS: usize = 2 * N_HALF_FULL_ROUNDS;
 const N_COLUMNS: usize = N_STATE * (1 + FULL_ROUNDS) + N_PARTIAL_ROUNDS + 4;
+const LOG_EXPAND: u32 = 2;
 
 pub const CONSTANT_1: [M31; 8] = [M31::from_u32_unchecked(0); 8];
 pub const CONSTANT_2: [M31; 8] = [
@@ -49,6 +60,28 @@ pub const CONSTANT_3: [M31; 8] = [
     M31::from_u32_unchecked(0x28679230),
     M31::from_u32_unchecked(0x249e2073),
 ];
+
+pub type PoseidonAcceleratorComponent = FrameworkComponent<PoseidonAcceleratorEval>;
+
+#[derive(Clone)]
+pub struct PoseidonAcceleratorEval {
+    pub log_n_rows: u32,
+    pub lookup_elements: PlonkWithAcceleratorLookupElements,
+    pub total_sum: SecureField,
+}
+
+impl FrameworkEval for PoseidonAcceleratorEval {
+    fn log_size(&self) -> u32 {
+        self.log_n_rows
+    }
+    fn max_constraint_log_degree_bound(&self) -> u32 {
+        self.log_n_rows + LOG_EXPAND
+    }
+    fn evaluate<E: EvalAtRow>(&self, mut eval: E) -> E {
+        eval_poseidon_constraints(&mut eval, &self.lookup_elements);
+        eval
+    }
+}
 
 #[inline(always)]
 /// Applies the M4 MDS matrix described in <https://eprint.iacr.org/2023/323.pdf> 5.1.
@@ -127,10 +160,10 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
     eval: &mut E,
     lookup_elements: &PlonkWithAcceleratorLookupElements,
 ) {
-    let [addr_1] = eval.next_interaction_mask(PREPROCESSED_TRACE_IDX, [0]);
-    let [addr_2] = eval.next_interaction_mask(PREPROCESSED_TRACE_IDX, [0]);
-    let [addr_3] = eval.next_interaction_mask(PREPROCESSED_TRACE_IDX, [0]);
-    let [addr_4] = eval.next_interaction_mask(PREPROCESSED_TRACE_IDX, [0]);
+    let addr_1 = eval.get_preprocessed_column(PreprocessedColumn::Poseidon(0));
+    let addr_2 = eval.get_preprocessed_column(PreprocessedColumn::Poseidon(1));
+    let addr_3 = eval.get_preprocessed_column(PreprocessedColumn::Poseidon(2));
+    let addr_4 = eval.get_preprocessed_column(PreprocessedColumn::Poseidon(3));
 
     let sel_1 = eval.next_trace_mask();
     let sel_2 = eval.next_trace_mask();
@@ -141,6 +174,8 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
 
     // Require state lookup.
     let initial_state = state.clone();
+
+    apply_external_round_matrix(&mut state);
 
     // 4 full rounds.
     (0..N_HALF_FULL_ROUNDS).for_each(|round| {
@@ -160,10 +195,12 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
     (0..N_PARTIAL_ROUNDS).for_each(|round| {
         state[0] += PARTIAL_ROUNDS_RC[round];
         state[0] = pow5(state[0].clone());
-        apply_internal_round_matrix(&mut state);
+
         let m = eval.next_trace_mask();
         eval.add_constraint(state[0].clone() - m.clone());
         state[0] = m;
+
+        apply_internal_round_matrix(&mut state);
     });
 
     // 4 full rounds.
@@ -180,7 +217,7 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
         })
     });
 
-    // 4 full rounds.
+    // the last full round
     {
         (0..N_STATE).for_each(|i| {
             state[i] += LAST_FOUR_ROUNDS_RC[3][i];
@@ -231,7 +268,7 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
         lookup_elements,
         E::EF::one(),
         &[
-            sel_1.clone(),
+            -sel_1,
             initial_state[0].clone(),
             initial_state[1].clone(),
             initial_state[2].clone(),
@@ -247,7 +284,7 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
         lookup_elements,
         E::EF::one(),
         &[
-            sel_2.clone(),
+            -sel_2,
             initial_state[8].clone(),
             initial_state[9].clone(),
             initial_state[10].clone(),
@@ -263,7 +300,7 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
         lookup_elements,
         E::EF::one(),
         &[
-            sel_3.clone(),
+            -sel_3,
             state[0].clone(),
             state[1].clone(),
             state[2].clone(),
@@ -279,7 +316,7 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
         lookup_elements,
         E::EF::one(),
         &[
-            sel_4.clone(),
+            -sel_4,
             state[8].clone(),
             state[9].clone(),
             state[10].clone(),
@@ -429,6 +466,8 @@ pub fn gen_trace(
             col_index += 1;
         });
 
+        apply_external_round_matrix(&mut state);
+
         // 4 full rounds.
         (0..N_HALF_FULL_ROUNDS).for_each(|round| {
             (0..N_STATE).for_each(|i| {
@@ -446,9 +485,9 @@ pub fn gen_trace(
         (0..N_PARTIAL_ROUNDS).for_each(|round| {
             state[0] += PackedBaseField::broadcast(PARTIAL_ROUNDS_RC[round]);
             state[0] = pow5(state[0]);
-            apply_internal_round_matrix(&mut state);
             trace[col_index].data[vec_index] = state[0];
             col_index += 1;
+            apply_internal_round_matrix(&mut state);
         });
 
         // 4 full rounds.
@@ -546,6 +585,8 @@ pub fn check_trace(trace: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, Bi
         // Require state lookup.
         let initial_state = state.clone();
 
+        apply_16x16_mds_matrix(&mut state);
+
         // 4 full rounds.
         (0..N_HALF_FULL_ROUNDS).for_each(|round| {
             (0..N_STATE).for_each(|i| {
@@ -568,6 +609,12 @@ pub fn check_trace(trace: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, Bi
             state[0] += PackedBaseField::broadcast(PARTIAL_ROUNDS_RC[round]);
             state[0] = pow5(state[0].clone());
 
+            assert_eq!(
+                state[0].into_simd(),
+                trace[col_index].data[vec_index].into_simd()
+            );
+            col_index += 1;
+
             let mut sum = state[0];
             for i in 1..16 {
                 sum += state[i];
@@ -575,12 +622,6 @@ pub fn check_trace(trace: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, Bi
             for i in 0..16 {
                 state[i] = sum + state[i] * PackedM31::broadcast(MAT_DIAG16_M_1[i]);
             }
-
-            assert_eq!(
-                state[0].into_simd(),
-                trace[col_index].data[vec_index].into_simd()
-            );
-            col_index += 1;
         });
 
         // 4 full rounds.
@@ -910,7 +951,7 @@ pub fn gen_constant_trace(
     let prescribed_flow = &metadata.prescribed_flow;
     let log_n_rows = prescribed_flow.addr_1.len().ilog2();
 
-    [
+    let mut res = [
         prescribed_flow.addr_1.clone(),
         prescribed_flow.addr_2.clone(),
         prescribed_flow.addr_3.clone(),
@@ -925,19 +966,258 @@ pub fn gen_constant_trace(
                 .collect(),
         )
     })
-    .collect()
+    .collect_vec();
+    res.push(gen_is_first(log_n_rows));
+    res
+}
+
+#[allow(unused)]
+pub fn prove_poseidon_accelerator(
+    log_n_rows: u32,
+    config: PcsConfig,
+) -> (
+    PoseidonAcceleratorComponent,
+    StarkProof<Blake2sMerkleHasher>,
+) {
+    // Additional test constants
+    const TEST_1: [BaseField; 8] = [
+        BaseField::from_u32_unchecked(0),
+        BaseField::from_u32_unchecked(1),
+        BaseField::from_u32_unchecked(2),
+        BaseField::from_u32_unchecked(3),
+        BaseField::from_u32_unchecked(4),
+        BaseField::from_u32_unchecked(5),
+        BaseField::from_u32_unchecked(6),
+        BaseField::from_u32_unchecked(7),
+    ];
+    const TEST_2: [BaseField; 8] = [
+        BaseField::from_u32_unchecked(8),
+        BaseField::from_u32_unchecked(9),
+        BaseField::from_u32_unchecked(10),
+        BaseField::from_u32_unchecked(11),
+        BaseField::from_u32_unchecked(12),
+        BaseField::from_u32_unchecked(13),
+        BaseField::from_u32_unchecked(14),
+        BaseField::from_u32_unchecked(15),
+    ];
+
+    const TEST_3: [BaseField; 8] = [
+        BaseField::from_u32_unchecked(0x0f8b2223),
+        BaseField::from_u32_unchecked(0x4681926c),
+        BaseField::from_u32_unchecked(0x62bf39da),
+        BaseField::from_u32_unchecked(0x2c775855),
+        BaseField::from_u32_unchecked(0x0621c328),
+        BaseField::from_u32_unchecked(0x6c092e66),
+        BaseField::from_u32_unchecked(0x1ebf9d29),
+        BaseField::from_u32_unchecked(0x2d015c8e),
+    ];
+
+    const TEST_4: [BaseField; 8] = [
+        BaseField::from_u32_unchecked(0x6447f97c),
+        BaseField::from_u32_unchecked(0x4b6cc939),
+        BaseField::from_u32_unchecked(0x0e395f63),
+        BaseField::from_u32_unchecked(0x0bf7f688),
+        BaseField::from_u32_unchecked(0x62ed4765),
+        BaseField::from_u32_unchecked(0x7bfd5e1b),
+        BaseField::from_u32_unchecked(0x4bafb4b0),
+        BaseField::from_u32_unchecked(0x4cc30530),
+    ];
+
+    const DEBUG_1: [BaseField; 8] = DEBUG_2;
+    const DEBUG_2: [BaseField; 8] = [
+        BaseField::from_u32_unchecked(1),
+        BaseField::from_u32_unchecked(2),
+        BaseField::from_u32_unchecked(3),
+        BaseField::from_u32_unchecked(4),
+        BaseField::from_u32_unchecked(5),
+        BaseField::from_u32_unchecked(6),
+        BaseField::from_u32_unchecked(7),
+        BaseField::from_u32_unchecked(8),
+    ];
+    const DEBUG_3: [BaseField; 8] = [
+        BaseField::from_u32_unchecked(0x61109b07),
+        BaseField::from_u32_unchecked(0x69b42769),
+        BaseField::from_u32_unchecked(0x19162ec2),
+        BaseField::from_u32_unchecked(0x7268b6d9),
+        BaseField::from_u32_unchecked(0x5377d668),
+        BaseField::from_u32_unchecked(0x0bd652dd),
+        BaseField::from_u32_unchecked(0x3d94d2af),
+        BaseField::from_u32_unchecked(0x74c0d75d),
+    ];
+    const DEBUG_4: [BaseField; 8] = [
+        BaseField::from_u32_unchecked(0x25b3470d),
+        BaseField::from_u32_unchecked(0x2f6668d6),
+        BaseField::from_u32_unchecked(0x02d25791),
+        BaseField::from_u32_unchecked(0x2762be7f),
+        BaseField::from_u32_unchecked(0x1fb82b4f),
+        BaseField::from_u32_unchecked(0x663e67af),
+        BaseField::from_u32_unchecked(0x341bea2d),
+        BaseField::from_u32_unchecked(0x1d4452ff),
+    ];
+
+    // Prepare a fibonacci circuit.
+    assert!(log_n_rows >= LOG_N_LANES);
+    let n_rows = ((1 << log_n_rows) as usize) - 10;
+
+    let mut data_flow = PoseidonDataFlow(HashMap::new());
+    data_flow.0.insert(123001, CONSTANT_1);
+    data_flow.0.insert(123002, CONSTANT_2);
+    data_flow.0.insert(123003, CONSTANT_3);
+    data_flow.0.insert(256001, TEST_1);
+    data_flow.0.insert(256002, TEST_2);
+    data_flow.0.insert(256003, TEST_3);
+    data_flow.0.insert(256004, TEST_4);
+
+    let prescribed_flow = PoseidonPrescribedFlow {
+        addr_1: vec![456001; n_rows],
+        addr_2: vec![456001; n_rows],
+        addr_3: vec![456002; n_rows],
+        addr_4: vec![456003; n_rows],
+    };
+
+    let (sel_1, sel_2, sel_3, sel_4) = {
+        let mut sel_1 = Vec::with_capacity(n_rows);
+        let mut sel_2 = Vec::with_capacity(n_rows);
+        let mut sel_3 = Vec::with_capacity(n_rows);
+        let mut sel_4 = Vec::with_capacity(n_rows);
+
+        let mut prng = SmallRng::seed_from_u64(0);
+        for _ in 0..n_rows {
+            if prng.gen::<bool>() == true {
+                sel_1.push(123001);
+                sel_2.push(123001);
+                sel_3.push(123002);
+                sel_4.push(123003);
+            } else {
+                sel_1.push(256001);
+                sel_2.push(256002);
+                sel_3.push(256003);
+                sel_4.push(256004);
+            }
+        }
+        (sel_1, sel_2, sel_3, sel_4)
+    };
+
+    let control_flow = PoseidonControlFlow {
+        sel_1,
+        sel_2,
+        sel_3,
+        sel_4,
+    };
+
+    let mut metadata = PoseidonMetadata {
+        prescribed_flow,
+        control_flow,
+        data_flow,
+        constant_1_addr: 456001,
+        constant_1_sel: 123001,
+        constant_2_addr: 456002,
+        constant_2_sel: 123002,
+        constant_3_addr: 456003,
+        constant_3_sel: 123003,
+    };
+
+    // Precompute twiddles.
+    let span = span!(Level::INFO, "Precompute twiddles").entered();
+    let twiddles = SimdBackend::precompute_twiddles(
+        CanonicCoset::new(log_n_rows + config.fri_config.log_blowup_factor + LOG_EXPAND)
+            .circle_domain()
+            .half_coset,
+    );
+    span.exit();
+
+    // Setup protocol.
+    let channel = &mut Blake2sChannel::default();
+    let mut commitment_scheme =
+        CommitmentSchemeProver::<_, Blake2sMerkleChannel>::new(config, &twiddles);
+
+    let trace = gen_trace(&mut metadata);
+    check_trace(&trace);
+    let constant_trace = gen_constant_trace(&mut metadata);
+
+    // Preprocessed trace.
+    let span = span!(Level::INFO, "Constant").entered();
+    let mut tree_builder = commitment_scheme.tree_builder();
+    let constants_trace_location = tree_builder.extend_evals(constant_trace.clone());
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Trace.
+    let span = span!(Level::INFO, "Trace").entered();
+    let mut tree_builder = commitment_scheme.tree_builder();
+    let base_trace_location = tree_builder.extend_evals(trace.clone());
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Draw lookup element.
+    let lookup_elements = PlonkWithAcceleratorLookupElements::draw(channel);
+
+    // Interaction trace.
+    let span = span!(Level::INFO, "Interaction").entered();
+    let (interaction_trace, total_sum) = gen_interaction_trace(&mut metadata, &lookup_elements);
+    check_interaction_trace(
+        &trace,
+        &interaction_trace,
+        &constant_trace,
+        &lookup_elements,
+        total_sum,
+    );
+    let mut tree_builder = commitment_scheme.tree_builder();
+    let interaction_trace_location = tree_builder.extend_evals(interaction_trace);
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Prove constraints.
+    let component = PoseidonAcceleratorComponent::new(
+        &mut TraceLocationAllocator::default(),
+        PoseidonAcceleratorEval {
+            log_n_rows,
+            lookup_elements,
+            total_sum,
+        },
+        (total_sum, None),
+    );
+
+    // Sanity check. Remove for production.
+    let trace_polys = commitment_scheme
+        .trees
+        .as_ref()
+        .map(|t| t.polynomials.iter().cloned().collect_vec());
+    assert_constraints(
+        &trace_polys,
+        CanonicCoset::new(log_n_rows),
+        |mut eval| {
+            component.evaluate(eval);
+        },
+        (total_sum, None),
+    );
+
+    let proof = prove(&[&component], channel, commitment_scheme).unwrap();
+
+    (component, proof)
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::env;
 
+    use itertools::Itertools;
+
+    use crate::constraint_framework::assert_constraints;
+    use crate::core::air::Component;
     use crate::core::channel::Blake2sChannel;
+    use crate::core::fri::FriConfig;
+    use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
+    use crate::core::poly::circle::CanonicCoset;
+    use crate::core::prover::verify;
+    use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use crate::examples::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
     use crate::examples::plonk_with_poseidon::poseidon::{
-        check_interaction_trace, check_trace, gen_constant_trace, gen_interaction_trace, gen_trace,
-        PoseidonControlFlow, PoseidonDataFlow, PoseidonMetadata, PoseidonPrescribedFlow,
-        CONSTANT_1, CONSTANT_2, CONSTANT_3,
+        check_interaction_trace, check_trace, eval_poseidon_constraints, gen_constant_trace,
+        gen_interaction_trace, gen_trace, prove_poseidon_accelerator, PoseidonControlFlow,
+        PoseidonDataFlow, PoseidonMetadata, PoseidonPrescribedFlow, CONSTANT_1, CONSTANT_2,
+        CONSTANT_3,
     };
 
     fn get_test_metadata() -> PoseidonMetadata {
@@ -979,6 +1259,8 @@ mod tests {
         let trace = gen_trace(&mut metadata);
         check_trace(&trace);
 
+        let log_n_rows = metadata.prescribed_flow.addr_1.len().ilog2();
+
         let mut channel = Blake2sChannel::default();
         let lookup_elements = PlonkWithAcceleratorLookupElements::draw(&mut channel);
 
@@ -986,5 +1268,54 @@ mod tests {
 
         let (interaction, total_sum) = gen_interaction_trace(&mut metadata, &lookup_elements);
         check_interaction_trace(&trace, &interaction, &constant, &lookup_elements, total_sum);
+
+        let traces = TreeVec::new(vec![constant, trace, interaction]);
+        let trace_polys =
+            traces.map(|trace| trace.into_iter().map(|c| c.interpolate()).collect_vec());
+        assert_constraints(
+            &trace_polys,
+            CanonicCoset::new(log_n_rows),
+            |mut eval| {
+                eval_poseidon_constraints(&mut eval, &lookup_elements);
+            },
+            (total_sum, None),
+        );
+    }
+
+    #[test_log::test]
+    fn test_simd_poseidon_prove() {
+        // Get from environment variable:
+        let log_n_instances = env::var("LOG_N_INSTANCES")
+            .unwrap_or_else(|_| "10".to_string())
+            .parse::<u32>()
+            .unwrap();
+        let config = PcsConfig {
+            pow_bits: 10,
+            fri_config: FriConfig::new(5, 4, 64),
+        };
+
+        // Prove.
+        let (component, proof) = prove_poseidon_accelerator(log_n_instances, config);
+
+        // Verify.
+        // TODO: Create Air instance independently.
+        let channel = &mut Blake2sChannel::default();
+        let commitment_scheme = &mut CommitmentSchemeVerifier::<Blake2sMerkleChannel>::new(config);
+
+        // Decommit.
+        // Retrieve the expected column sizes in each commitment interaction, from the AIR.
+        let sizes = component.trace_log_degree_bounds();
+
+        // Preprocessed columns.
+        commitment_scheme.commit(proof.commitments[0], &sizes[0], channel);
+        // Trace columns.
+        commitment_scheme.commit(proof.commitments[1], &sizes[1], channel);
+        // Draw lookup element.
+        let lookup_elements = PlonkWithAcceleratorLookupElements::draw(channel);
+        assert_eq!(lookup_elements, component.lookup_elements);
+        // Interaction columns.
+        commitment_scheme.commit(proof.commitments[2], &sizes[2], channel);
+
+        verify(&[&component], channel, commitment_scheme, proof).unwrap();
     }
 }

@@ -22,6 +22,7 @@ pub enum PreprocessedColumn {
     /// A column with `1` at the first position, and `0` elsewhere.
     IsFirst(u32),
     Plonk(usize),
+    Poseidon(usize),
     /// A column with the numbers [0..2^log_size-1].
     Seq(u32),
     XorTable(u32, u32, usize),
@@ -32,6 +33,7 @@ impl PreprocessedColumn {
         match self {
             PreprocessedColumn::IsFirst(_) => "preprocessed_is_first",
             PreprocessedColumn::Plonk(_) => "preprocessed_plonk",
+            PreprocessedColumn::Poseidon(_) => "preprocessed_poseidon",
             PreprocessedColumn::Seq(_) => "preprocessed_seq",
             PreprocessedColumn::XorTable(..) => "preprocessed_xor_table",
         }
@@ -43,6 +45,7 @@ impl PreprocessedColumn {
             PreprocessedColumn::Seq(log_size) => *log_size,
             PreprocessedColumn::XorTable(log_size, ..) => *log_size,
             PreprocessedColumn::Plonk(_) => unimplemented!(),
+            PreprocessedColumn::Poseidon(_) => unimplemented!(),
         }
     }
 
@@ -80,8 +83,12 @@ impl PreprocessedColumn {
     ) -> CircleEvaluation<B, BaseField, BitReversedOrder> {
         match preprocessed_column {
             PreprocessedColumn::IsFirst(log_size) => gen_is_first(*log_size),
-            PreprocessedColumn::Plonk(_) | PreprocessedColumn::XorTable(..) => {
-                unimplemented!("eval_preprocessed_column: Plonk and XorTable are not supported.")
+            PreprocessedColumn::Plonk(_)
+            | PreprocessedColumn::XorTable(..)
+            | PreprocessedColumn::Poseidon(_) => {
+                unimplemented!(
+                    "eval_preprocessed_column: Plonk, Poseidon, and XorTable are not supported."
+                )
             }
             PreprocessedColumn::Seq(log_size) => gen_seq(*log_size),
         }

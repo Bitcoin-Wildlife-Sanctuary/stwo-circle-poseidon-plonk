@@ -14,8 +14,8 @@ use crate::core::backend::simd::column::BaseColumn;
 use crate::core::backend::simd::m31::{PackedM31, LOG_N_LANES};
 use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
-use crate::core::backend::Column;
-use crate::core::channel::Blake2sChannel;
+use crate::core::backend::{BackendForChannel, Column};
+use crate::core::channel::MerkleChannel;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
 use crate::core::pcs::{CommitmentSchemeProver, PcsConfig, TreeSubspan};
@@ -63,8 +63,9 @@ impl FrameworkEval for PlonkWithAcceleratorEval {
         let c_vals = eval.next_interaction_mask(ORIGINAL_TRACE_IDX, [0, 1, 2, 3, 4, 5, 6, 7]);
 
         eval.add_constraint(
-            c_vals[0].clone() - op.clone() * (a_val.clone() + b_val.clone())
-                + (E::F::one() - op) * a_val.clone() * b_val.clone(),
+            c_vals[0].clone()
+                - op.clone() * (a_val.clone() + b_val.clone())
+                - (E::F::one() - op) * a_val.clone() * b_val.clone(),
         );
 
         eval.add_to_relation(RelationEntry::new(
@@ -106,7 +107,7 @@ impl FrameworkEval for PlonkWithAcceleratorEval {
 }
 
 #[derive(Clone)]
-pub struct Plonk2CircuitTrace {
+pub struct PlonkWithAcceleratorCircuitTrace {
     pub mult: BaseColumn,
     pub mult_poseidon: BaseColumn,
     pub a_wire: BaseColumn,
@@ -119,7 +120,7 @@ pub struct Plonk2CircuitTrace {
 }
 pub fn gen_trace(
     log_size: u32,
-    circuit: &Plonk2CircuitTrace,
+    circuit: &PlonkWithAcceleratorCircuitTrace,
 ) -> ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>> {
     let _span = span!(Level::INFO, "Generation").entered();
 
@@ -132,7 +133,7 @@ pub fn gen_trace(
 
 pub fn gen_interaction_trace(
     log_size: u32,
-    circuit: &Plonk2CircuitTrace,
+    circuit: &PlonkWithAcceleratorCircuitTrace,
     lookup_elements: &LookupElements<9>,
 ) -> (
     ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
@@ -187,36 +188,15 @@ pub fn gen_interaction_trace(
     logup_gen.finalize_last_canonical()
 }
 
-#[allow(unused)]
-pub fn prove_fibonacci_plonk_with_accelerator(
+pub fn prove_plonk_with_accelerator<MC: MerkleChannel>(
     log_n_rows: u32,
     config: PcsConfig,
-) -> (
-    PlonkWithAcceleratorComponent,
-    StarkProof<Blake2sMerkleHasher>,
-) {
+    circuit: &PlonkWithAcceleratorCircuitTrace,
+) -> (PlonkWithAcceleratorComponent, StarkProof<MC::H>)
+where
+    SimdBackend: BackendForChannel<MC>,
+{
     assert!(log_n_rows >= LOG_N_LANES);
-
-    // Prepare a fibonacci circuit.
-    let mut fib_values = vec![BaseField::one(), BaseField::one()];
-    for _ in 0..(1 << log_n_rows) {
-        fib_values.push(fib_values[fib_values.len() - 1] + fib_values[fib_values.len() - 2]);
-    }
-    let range = 0..(1 << log_n_rows);
-    let mut circuit = Plonk2CircuitTrace {
-        mult: range.clone().map(|_| 2.into()).collect(),
-        mult_poseidon: range.clone().map(|_| 0.into()).collect(),
-        a_wire: range.clone().map(|i| i.into()).collect(),
-        b_wire: range.clone().map(|i| (i + 1).into()).collect(),
-        c_wire: range.clone().map(|i| (i + 2).into()).collect(),
-        op: range.clone().map(|_| 1.into()).collect(),
-        a_val: range.clone().map(|i| fib_values[i]).collect(),
-        b_val: range.clone().map(|i| fib_values[i + 1]).collect(),
-        c_val: range.clone().map(|i| fib_values[i + 2]).collect(),
-    };
-    circuit.mult_poseidon.set(1, 1.into());
-    circuit.mult.set((1 << log_n_rows) - 1, 0.into());
-    circuit.mult.set((1 << log_n_rows) - 2, 1.into());
 
     // Precompute twiddles.
     let span = span!(Level::INFO, "Precompute twiddles").entered();
@@ -228,9 +208,8 @@ pub fn prove_fibonacci_plonk_with_accelerator(
     span.exit();
 
     // Setup protocol.
-    let channel = &mut Blake2sChannel::default();
-    let mut commitment_scheme =
-        CommitmentSchemeProver::<_, Blake2sMerkleChannel>::new(config, &twiddles);
+    let channel = &mut MC::C::default();
+    let mut commitment_scheme = CommitmentSchemeProver::<_, MC>::new(config, &twiddles);
 
     // Preprocessed trace.
     let span = span!(Level::INFO, "Constant").entered();
@@ -297,7 +276,7 @@ pub fn prove_fibonacci_plonk_with_accelerator(
     assert_constraints(
         &trace_polys,
         CanonicCoset::new(log_n_rows),
-        |mut eval| {
+        |eval| {
             component.evaluate(eval);
         },
         (total_sum, None),
@@ -306,6 +285,40 @@ pub fn prove_fibonacci_plonk_with_accelerator(
     let proof = prove(&[&component], channel, commitment_scheme).unwrap();
 
     (component, proof)
+}
+
+#[allow(unused)]
+pub fn prove_fibonacci_plonk_with_accelerator(
+    log_n_rows: u32,
+    config: PcsConfig,
+) -> (
+    PlonkWithAcceleratorComponent,
+    StarkProof<Blake2sMerkleHasher>,
+) {
+    assert!(log_n_rows >= LOG_N_LANES);
+
+    // Prepare a fibonacci circuit.
+    let mut fib_values = vec![BaseField::one(), BaseField::one()];
+    for _ in 0..(1 << log_n_rows) {
+        fib_values.push(fib_values[fib_values.len() - 1] + fib_values[fib_values.len() - 2]);
+    }
+    let range = 0..(1 << log_n_rows);
+    let mut circuit = PlonkWithAcceleratorCircuitTrace {
+        mult: range.clone().map(|_| 2.into()).collect(),
+        mult_poseidon: range.clone().map(|_| 0.into()).collect(),
+        a_wire: range.clone().map(|i| i.into()).collect(),
+        b_wire: range.clone().map(|i| (i + 1).into()).collect(),
+        c_wire: range.clone().map(|i| (i + 2).into()).collect(),
+        op: range.clone().map(|_| 1.into()).collect(),
+        a_val: range.clone().map(|i| fib_values[i]).collect(),
+        b_val: range.clone().map(|i| fib_values[i + 1]).collect(),
+        c_val: range.clone().map(|i| fib_values[i + 2]).collect(),
+    };
+    circuit.mult_poseidon.set(1, 1.into());
+    circuit.mult.set((1 << log_n_rows) - 1, 0.into());
+    circuit.mult.set((1 << log_n_rows) - 2, 1.into());
+
+    prove_plonk_with_accelerator::<Blake2sMerkleChannel>(log_n_rows, config, &circuit)
 }
 
 #[cfg(test)]

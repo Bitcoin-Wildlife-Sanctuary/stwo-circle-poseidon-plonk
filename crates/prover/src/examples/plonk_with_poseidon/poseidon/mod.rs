@@ -16,12 +16,12 @@ use crate::constraint_framework::{
 use crate::core::backend::simd::m31::{PackedBaseField, PackedM31, LOG_N_LANES, N_LANES};
 use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
-use crate::core::backend::{Col, Column};
-use crate::core::channel::Blake2sChannel;
+use crate::core::backend::{BackendForChannel, Col, Column};
+use crate::core::channel::MerkleChannel;
 use crate::core::fields::m31::{BaseField, M31};
 use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::fields::FieldExpOps;
-use crate::core::pcs::{CommitmentSchemeProver, PcsConfig};
+use crate::core::pcs::{CommitmentSchemeProver, PcsConfig, TreeSubspan};
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
 use crate::core::poly::BitReversedOrder;
 use crate::core::prover::{prove, StarkProof};
@@ -68,6 +68,9 @@ pub struct PoseidonAcceleratorEval {
     pub log_n_rows: u32,
     pub lookup_elements: PlonkWithAcceleratorLookupElements,
     pub total_sum: SecureField,
+    pub base_trace_location: TreeSubspan,
+    pub interaction_trace_location: TreeSubspan,
+    pub constants_trace_location: TreeSubspan,
 }
 
 impl FrameworkEval for PoseidonAcceleratorEval {
@@ -971,14 +974,109 @@ pub fn gen_constant_trace(
     res
 }
 
+pub fn prove_poseidon_accelerator<MC: MerkleChannel>(
+    log_n_rows: u32,
+    config: PcsConfig,
+    metadata: &mut PoseidonMetadata,
+) -> (PoseidonAcceleratorComponent, StarkProof<MC::H>)
+where
+    SimdBackend: BackendForChannel<MC>,
+{
+    // Prepare a fibonacci circuit.
+    assert!(log_n_rows >= LOG_N_LANES);
+
+    // Precompute twiddles.
+    let span = span!(Level::INFO, "Precompute twiddles").entered();
+    let twiddles = SimdBackend::precompute_twiddles(
+        CanonicCoset::new(log_n_rows + config.fri_config.log_blowup_factor + LOG_EXPAND)
+            .circle_domain()
+            .half_coset,
+    );
+    span.exit();
+
+    // Setup protocol.
+    let channel = &mut MC::C::default();
+    let mut commitment_scheme = CommitmentSchemeProver::<_, MC>::new(config, &twiddles);
+
+    let trace = gen_trace(metadata);
+    check_trace(&trace);
+    let constant_trace = gen_constant_trace(metadata);
+
+    // Preprocessed trace.
+    let span = span!(Level::INFO, "Constant").entered();
+    let mut tree_builder = commitment_scheme.tree_builder();
+    let constants_trace_location = tree_builder.extend_evals(constant_trace.clone());
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Trace.
+    let span = span!(Level::INFO, "Trace").entered();
+    let mut tree_builder = commitment_scheme.tree_builder();
+    let base_trace_location = tree_builder.extend_evals(trace.clone());
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Draw lookup element.
+    let lookup_elements = PlonkWithAcceleratorLookupElements::draw(channel);
+
+    // Interaction trace.
+    let span = span!(Level::INFO, "Interaction").entered();
+    let (interaction_trace, total_sum) = gen_interaction_trace(metadata, &lookup_elements);
+    check_interaction_trace(
+        &trace,
+        &interaction_trace,
+        &constant_trace,
+        &lookup_elements,
+        total_sum,
+    );
+    let mut tree_builder = commitment_scheme.tree_builder();
+    let interaction_trace_location = tree_builder.extend_evals(interaction_trace);
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Prove constraints.
+    let component = PoseidonAcceleratorComponent::new(
+        &mut TraceLocationAllocator::default(),
+        PoseidonAcceleratorEval {
+            log_n_rows,
+            lookup_elements,
+            total_sum,
+            base_trace_location,
+            interaction_trace_location,
+            constants_trace_location,
+        },
+        (total_sum, None),
+    );
+
+    // Sanity check. Remove for production.
+    let trace_polys = commitment_scheme
+        .trees
+        .as_ref()
+        .map(|t| t.polynomials.iter().cloned().collect_vec());
+    assert_constraints(
+        &trace_polys,
+        CanonicCoset::new(log_n_rows),
+        |eval| {
+            component.evaluate(eval);
+        },
+        (total_sum, None),
+    );
+
+    let proof = prove(&[&component], channel, commitment_scheme).unwrap();
+
+    (component, proof)
+}
+
 #[allow(unused)]
-pub fn prove_poseidon_accelerator(
+pub fn prove_test_poseidon_accelerator(
     log_n_rows: u32,
     config: PcsConfig,
 ) -> (
     PoseidonAcceleratorComponent,
     StarkProof<Blake2sMerkleHasher>,
 ) {
+    let n_rows = ((1 << log_n_rows) as usize) - 10;
+
     // Additional test constants
     const TEST_1: [BaseField; 8] = [
         BaseField::from_u32_unchecked(0),
@@ -1021,38 +1119,6 @@ pub fn prove_poseidon_accelerator(
         BaseField::from_u32_unchecked(0x7bfd5e1b),
         BaseField::from_u32_unchecked(0x4bafb4b0),
         BaseField::from_u32_unchecked(0x4cc30530),
-    ];
-
-    const DEBUG_1: [BaseField; 8] = DEBUG_2;
-    const DEBUG_2: [BaseField; 8] = [
-        BaseField::from_u32_unchecked(1),
-        BaseField::from_u32_unchecked(2),
-        BaseField::from_u32_unchecked(3),
-        BaseField::from_u32_unchecked(4),
-        BaseField::from_u32_unchecked(5),
-        BaseField::from_u32_unchecked(6),
-        BaseField::from_u32_unchecked(7),
-        BaseField::from_u32_unchecked(8),
-    ];
-    const DEBUG_3: [BaseField; 8] = [
-        BaseField::from_u32_unchecked(0x61109b07),
-        BaseField::from_u32_unchecked(0x69b42769),
-        BaseField::from_u32_unchecked(0x19162ec2),
-        BaseField::from_u32_unchecked(0x7268b6d9),
-        BaseField::from_u32_unchecked(0x5377d668),
-        BaseField::from_u32_unchecked(0x0bd652dd),
-        BaseField::from_u32_unchecked(0x3d94d2af),
-        BaseField::from_u32_unchecked(0x74c0d75d),
-    ];
-    const DEBUG_4: [BaseField; 8] = [
-        BaseField::from_u32_unchecked(0x25b3470d),
-        BaseField::from_u32_unchecked(0x2f6668d6),
-        BaseField::from_u32_unchecked(0x02d25791),
-        BaseField::from_u32_unchecked(0x2762be7f),
-        BaseField::from_u32_unchecked(0x1fb82b4f),
-        BaseField::from_u32_unchecked(0x663e67af),
-        BaseField::from_u32_unchecked(0x341bea2d),
-        BaseField::from_u32_unchecked(0x1d4452ff),
     ];
 
     // Prepare a fibonacci circuit.
@@ -1117,84 +1183,7 @@ pub fn prove_poseidon_accelerator(
         constant_3_sel: 123003,
     };
 
-    // Precompute twiddles.
-    let span = span!(Level::INFO, "Precompute twiddles").entered();
-    let twiddles = SimdBackend::precompute_twiddles(
-        CanonicCoset::new(log_n_rows + config.fri_config.log_blowup_factor + LOG_EXPAND)
-            .circle_domain()
-            .half_coset,
-    );
-    span.exit();
-
-    // Setup protocol.
-    let channel = &mut Blake2sChannel::default();
-    let mut commitment_scheme =
-        CommitmentSchemeProver::<_, Blake2sMerkleChannel>::new(config, &twiddles);
-
-    let trace = gen_trace(&mut metadata);
-    check_trace(&trace);
-    let constant_trace = gen_constant_trace(&mut metadata);
-
-    // Preprocessed trace.
-    let span = span!(Level::INFO, "Constant").entered();
-    let mut tree_builder = commitment_scheme.tree_builder();
-    let constants_trace_location = tree_builder.extend_evals(constant_trace.clone());
-    tree_builder.commit(channel);
-    span.exit();
-
-    // Trace.
-    let span = span!(Level::INFO, "Trace").entered();
-    let mut tree_builder = commitment_scheme.tree_builder();
-    let base_trace_location = tree_builder.extend_evals(trace.clone());
-    tree_builder.commit(channel);
-    span.exit();
-
-    // Draw lookup element.
-    let lookup_elements = PlonkWithAcceleratorLookupElements::draw(channel);
-
-    // Interaction trace.
-    let span = span!(Level::INFO, "Interaction").entered();
-    let (interaction_trace, total_sum) = gen_interaction_trace(&mut metadata, &lookup_elements);
-    check_interaction_trace(
-        &trace,
-        &interaction_trace,
-        &constant_trace,
-        &lookup_elements,
-        total_sum,
-    );
-    let mut tree_builder = commitment_scheme.tree_builder();
-    let interaction_trace_location = tree_builder.extend_evals(interaction_trace);
-    tree_builder.commit(channel);
-    span.exit();
-
-    // Prove constraints.
-    let component = PoseidonAcceleratorComponent::new(
-        &mut TraceLocationAllocator::default(),
-        PoseidonAcceleratorEval {
-            log_n_rows,
-            lookup_elements,
-            total_sum,
-        },
-        (total_sum, None),
-    );
-
-    // Sanity check. Remove for production.
-    let trace_polys = commitment_scheme
-        .trees
-        .as_ref()
-        .map(|t| t.polynomials.iter().cloned().collect_vec());
-    assert_constraints(
-        &trace_polys,
-        CanonicCoset::new(log_n_rows),
-        |mut eval| {
-            component.evaluate(eval);
-        },
-        (total_sum, None),
-    );
-
-    let proof = prove(&[&component], channel, commitment_scheme).unwrap();
-
-    (component, proof)
+    prove_poseidon_accelerator::<Blake2sMerkleChannel>(log_n_rows, config, &mut metadata)
 }
 
 #[cfg(test)]
@@ -1215,7 +1204,7 @@ mod tests {
     use crate::examples::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
     use crate::examples::plonk_with_poseidon::poseidon::{
         check_interaction_trace, check_trace, eval_poseidon_constraints, gen_constant_trace,
-        gen_interaction_trace, gen_trace, prove_poseidon_accelerator, PoseidonControlFlow,
+        gen_interaction_trace, gen_trace, prove_test_poseidon_accelerator, PoseidonControlFlow,
         PoseidonDataFlow, PoseidonMetadata, PoseidonPrescribedFlow, CONSTANT_1, CONSTANT_2,
         CONSTANT_3,
     };
@@ -1295,7 +1284,7 @@ mod tests {
         };
 
         // Prove.
-        let (component, proof) = prove_poseidon_accelerator(log_n_instances, config);
+        let (component, proof) = prove_test_poseidon_accelerator(log_n_instances, config);
 
         // Verify.
         // TODO: Create Air instance independently.

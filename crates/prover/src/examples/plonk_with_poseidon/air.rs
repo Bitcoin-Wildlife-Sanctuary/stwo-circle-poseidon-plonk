@@ -777,7 +777,7 @@ mod test {
         let (plonk, mut poseidon) = generate_test_circuit();
         let config = PcsConfig {
             pow_bits: 20,
-            fri_config: FriConfig::new(3, 5, 16),
+            fri_config: FriConfig::new(0, 5, 16),
         };
 
         let proof = prove_plonk_with_poseidon::<Poseidon31MerkleChannel>(

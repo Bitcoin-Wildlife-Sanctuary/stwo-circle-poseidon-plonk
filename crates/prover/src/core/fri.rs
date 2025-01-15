@@ -320,18 +320,18 @@ impl<'a, B: FriOps + MerkleOps<MC::H>, MC: MerkleChannel> FriProver<'a, B, MC> {
 }
 
 pub struct FriVerifier<MC: MerkleChannel> {
-    config: FriConfig,
+    pub config: FriConfig,
     // TODO(andrew): The first layer currently commits to all input polynomials. Consider allowing
     // flexibility to only commit to input polynomials on a per-log-size basis. This allows
     // flexibility for cases where committing to the first layer, for a specific log size, isn't
     // necessary. FRI would simply return more query positions for the "uncommitted" log sizes.
-    first_layer: FriFirstLayerVerifier<MC::H>,
-    inner_layers: Vec<FriInnerLayerVerifier<MC::H>>,
-    last_layer_domain: LineDomain,
-    last_layer_poly: LinePoly,
+    pub first_layer: FriFirstLayerVerifier<MC::H>,
+    pub inner_layers: Vec<FriInnerLayerVerifier<MC::H>>,
+    pub last_layer_domain: LineDomain,
+    pub last_layer_poly: LinePoly,
     /// The queries used for decommitment. Initialized when calling
     /// [`FriVerifier::sample_query_positions()`].
-    queries: Option<Queries>,
+    pub queries: Option<Queries>,
 }
 
 impl<MC: MerkleChannel> FriVerifier<MC> {
@@ -622,8 +622,8 @@ impl PartialEq<LinePolyDegreeBound> for CirclePolyDegreeBound {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct LinePolyDegreeBound {
-    log_degree_bound: u32,
+pub struct LinePolyDegreeBound {
+    pub log_degree_bound: u32,
 }
 
 impl LinePolyDegreeBound {
@@ -664,13 +664,13 @@ pub struct FriLayerProof<H: MerkleHasher> {
     pub commitment: H::Hash,
 }
 
-struct FriFirstLayerVerifier<H: MerkleHasher> {
+pub struct FriFirstLayerVerifier<H: MerkleHasher> {
     /// The list of degree bounds of all circle polynomials commited in the first layer.
-    column_bounds: Vec<CirclePolyDegreeBound>,
+    pub column_bounds: Vec<CirclePolyDegreeBound>,
     /// The commitment domain all the circle polynomials in the first layer.
-    column_commitment_domains: Vec<CircleDomain>,
-    folding_alpha: SecureField,
-    proof: FriLayerProof<H>,
+    pub column_commitment_domains: Vec<CircleDomain>,
+    pub folding_alpha: SecureField,
+    pub proof: FriLayerProof<H>,
 }
 
 impl<H: MerkleHasher> FriFirstLayerVerifier<H> {
@@ -760,12 +760,12 @@ impl<H: MerkleHasher> FriFirstLayerVerifier<H> {
     }
 }
 
-struct FriInnerLayerVerifier<H: MerkleHasher> {
-    degree_bound: LinePolyDegreeBound,
-    domain: LineDomain,
-    folding_alpha: SecureField,
-    layer_index: usize,
-    proof: FriLayerProof<H>,
+pub struct FriInnerLayerVerifier<H: MerkleHasher> {
+    pub degree_bound: LinePolyDegreeBound,
+    pub domain: LineDomain,
+    pub folding_alpha: SecureField,
+    pub layer_index: usize,
+    pub proof: FriLayerProof<H>,
 }
 
 impl<H: MerkleHasher> FriInnerLayerVerifier<H> {

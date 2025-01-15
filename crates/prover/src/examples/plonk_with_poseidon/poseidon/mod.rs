@@ -352,20 +352,14 @@ pub struct PoseidonMetadata {
     pub prescribed_flow: PoseidonPrescribedFlow,
     pub control_flow: PoseidonControlFlow,
     pub data_flow: PoseidonDataFlow,
-    pub constant_1_addr: usize,
-    pub constant_1_sel: usize,
-    pub constant_2_addr: usize,
-    pub constant_2_sel: usize,
-    pub constant_3_addr: usize,
-    pub constant_3_sel: usize,
 }
 
 pub fn gen_trace(
-    metadata: &mut PoseidonMetadata,
+    metadata: &PoseidonMetadata,
 ) -> ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>> {
-    let prescribed_flow = &mut metadata.prescribed_flow;
-    let control_flow = &mut metadata.control_flow;
-    let data_flow = &mut metadata.data_flow;
+    let prescribed_flow = &metadata.prescribed_flow;
+    let control_flow = &metadata.control_flow;
+    let data_flow = &metadata.data_flow;
 
     // check the length
     let len = prescribed_flow.addr_1.len();
@@ -377,39 +371,9 @@ pub fn gen_trace(
     assert_eq!(len, control_flow.sel_3.len());
     assert_eq!(len, control_flow.sel_4.len());
 
-    // check the constants are given
-    assert!(data_flow.0.contains_key(&metadata.constant_1_sel));
-    assert!(data_flow.0.contains_key(&metadata.constant_2_sel));
-    assert!(data_flow.0.contains_key(&metadata.constant_3_sel));
-
     // compute the circuit size
-    let log_size = len.next_power_of_two().ilog2();
-
-    prescribed_flow
-        .addr_1
-        .resize(1 << log_size, metadata.constant_1_addr);
-    prescribed_flow
-        .addr_2
-        .resize(1 << log_size, metadata.constant_1_addr);
-    prescribed_flow
-        .addr_3
-        .resize(1 << log_size, metadata.constant_2_addr);
-    prescribed_flow
-        .addr_4
-        .resize(1 << log_size, metadata.constant_3_addr);
-
-    control_flow
-        .sel_1
-        .resize(1 << log_size, metadata.constant_1_sel);
-    control_flow
-        .sel_2
-        .resize(1 << log_size, metadata.constant_1_sel);
-    control_flow
-        .sel_3
-        .resize(1 << log_size, metadata.constant_2_sel);
-    control_flow
-        .sel_4
-        .resize(1 << log_size, metadata.constant_3_sel);
+    assert!(len.is_power_of_two());
+    let log_size = len.ilog2();
 
     let _span = span!(Level::INFO, "Generation").entered();
     assert!(log_size >= LOG_N_LANES);
@@ -670,15 +634,15 @@ pub fn check_trace(trace: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, Bi
 }
 
 pub fn gen_interaction_trace(
-    metadata: &mut PoseidonMetadata,
+    metadata: &PoseidonMetadata,
     lookup_elements: &PlonkWithAcceleratorLookupElements,
 ) -> (
     ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
     SecureField,
 ) {
-    let prescribed_flow = &mut metadata.prescribed_flow;
-    let control_flow = &mut metadata.control_flow;
-    let data_flow = &mut metadata.data_flow;
+    let prescribed_flow = &metadata.prescribed_flow;
+    let control_flow = &metadata.control_flow;
+    let data_flow = &metadata.data_flow;
 
     // check the length
     let len = prescribed_flow.addr_1.len();
@@ -689,11 +653,6 @@ pub fn gen_interaction_trace(
     assert_eq!(len, control_flow.sel_2.len());
     assert_eq!(len, control_flow.sel_3.len());
     assert_eq!(len, control_flow.sel_4.len());
-
-    // check the constants are given
-    assert!(data_flow.0.contains_key(&metadata.constant_1_sel));
-    assert!(data_flow.0.contains_key(&metadata.constant_2_sel));
-    assert!(data_flow.0.contains_key(&metadata.constant_3_sel));
 
     // compute the circuit size
     assert!(len.is_power_of_two());
@@ -946,7 +905,7 @@ pub fn check_interaction_trace(
 }
 
 pub fn gen_constant_trace(
-    metadata: &mut PoseidonMetadata,
+    metadata: &PoseidonMetadata,
 ) -> ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>> {
     let prescribed_flow = &metadata.prescribed_flow;
     let log_n_rows = prescribed_flow.addr_1.len().ilog2();
@@ -1069,8 +1028,6 @@ pub fn prove_test_poseidon_accelerator(
     PoseidonAcceleratorComponent,
     StarkProof<Blake2sMerkleHasher>,
 ) {
-    let n_rows = ((1 << log_n_rows) as usize) - 10;
-
     // Additional test constants
     const TEST_1: [BaseField; 8] = [
         BaseField::from_u32_unchecked(0),
@@ -1117,7 +1074,7 @@ pub fn prove_test_poseidon_accelerator(
 
     // Prepare a fibonacci circuit.
     assert!(log_n_rows >= LOG_N_LANES);
-    let n_rows = ((1 << log_n_rows) as usize) - 10;
+    let n_rows = (1 << log_n_rows) as usize;
 
     let mut data_flow = PoseidonDataFlow(HashMap::new());
     data_flow.0.insert(123001, CONSTANT_1);
@@ -1169,12 +1126,6 @@ pub fn prove_test_poseidon_accelerator(
         prescribed_flow,
         control_flow,
         data_flow,
-        constant_1_addr: 456001,
-        constant_1_sel: 123001,
-        constant_2_addr: 456002,
-        constant_2_sel: 123002,
-        constant_3_addr: 456003,
-        constant_3_sel: 123003,
     };
 
     prove_poseidon_accelerator::<Blake2sMerkleChannel>(log_n_rows, config, &mut metadata)
@@ -1227,19 +1178,13 @@ mod tests {
             prescribed_flow,
             control_flow,
             data_flow,
-            constant_1_addr: 456001,
-            constant_1_sel: 123001,
-            constant_2_addr: 456002,
-            constant_2_sel: 123002,
-            constant_3_addr: 456003,
-            constant_3_sel: 123003,
         }
     }
 
     #[test]
     fn test_poseidon_trace() {
-        let mut metadata = get_test_metadata();
-        let trace = gen_trace(&mut metadata);
+        let metadata = get_test_metadata();
+        let trace = gen_trace(&metadata);
         check_trace(&trace);
 
         let log_n_rows = metadata.prescribed_flow.addr_1.len().ilog2();
@@ -1247,9 +1192,9 @@ mod tests {
         let mut channel = Blake2sChannel::default();
         let lookup_elements = PlonkWithAcceleratorLookupElements::draw(&mut channel);
 
-        let constant = gen_constant_trace(&mut metadata);
+        let constant = gen_constant_trace(&metadata);
 
-        let (interaction, total_sum) = gen_interaction_trace(&mut metadata, &lookup_elements);
+        let (interaction, total_sum) = gen_interaction_trace(&metadata, &lookup_elements);
         check_interaction_trace(&trace, &interaction, &constant, &lookup_elements, total_sum);
 
         let traces = TreeVec::new(vec![constant, trace, interaction]);

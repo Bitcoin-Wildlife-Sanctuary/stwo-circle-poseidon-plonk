@@ -625,12 +625,6 @@ mod test {
             prescribed_flow,
             control_flow,
             data_flow,
-            constant_1_addr: addr_constant_idx[0],
-            constant_1_sel: constant_idx[0],
-            constant_2_addr: addr_constant_idx[1],
-            constant_2_sel: constant_idx[1],
-            constant_3_addr: addr_constant_idx[2],
-            constant_3_sel: constant_idx[2],
         };
 
         for r in [

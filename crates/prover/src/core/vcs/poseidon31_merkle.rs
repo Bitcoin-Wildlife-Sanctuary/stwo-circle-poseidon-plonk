@@ -48,7 +48,7 @@ impl MerkleHasher for Poseidon31MerkleHasher {
                 Poseidon31CRH::compress(&res)
             };
 
-            for chunk in column_values.chunks(ELEMENTS_IN_BLOCK).skip(2) {
+            for chunk in column_values.chunks_exact(ELEMENTS_IN_BLOCK).skip(2) {
                 let mut state = [zero; 16];
                 state[..8].copy_from_slice(&digest);
                 state[8..16].copy_from_slice(chunk);

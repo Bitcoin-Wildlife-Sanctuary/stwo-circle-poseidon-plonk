@@ -2,7 +2,7 @@ use std::cmp::max;
 
 use itertools::{chain, Itertools};
 use num_traits::{One, Zero};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::{span, Level};
 
 use crate::constraint_framework::preprocessed_columns::{gen_is_first, PreprocessedColumn};
@@ -33,7 +33,7 @@ use crate::examples::plonk_with_poseidon::poseidon::{
 };
 use crate::examples::plonk_with_poseidon::{plonk, poseidon};
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PlonkWithPoseidonStatement0 {
     log_size_plonk: u32,
     log_size_poseidon: u32,
@@ -64,6 +64,7 @@ impl PlonkWithPoseidonStatement0 {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PlonkWithPoseidonStatement1 {
     pub plonk_total_sum: SecureField,
     pub poseidon_total_sum: SecureField,
@@ -75,20 +76,18 @@ impl PlonkWithPoseidonStatement1 {
     }
 }
 
-#[allow(unused)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PlonkWithPoseidonProof<H: MerkleHasher> {
     stmt0: PlonkWithPoseidonStatement0,
     stmt1: PlonkWithPoseidonStatement1,
     stark_proof: StarkProof<H>,
 }
 
-#[allow(unused)]
 pub struct PlonkWithPoseidonComponents {
     pub plonk: PlonkWithAcceleratorComponent,
     pub poseidon: PoseidonAcceleratorComponent,
 }
 
-#[allow(unused)]
 impl PlonkWithPoseidonComponents {
     fn new(
         stmt0: &PlonkWithPoseidonStatement0,
@@ -338,8 +337,9 @@ mod test {
     use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
     use crate::core::prover::verify;
     use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+    use crate::core::vcs::poseidon31_merkle::{Poseidon31MerkleChannel, Poseidon31MerkleHasher};
     use crate::examples::plonk_with_poseidon::air::{
-        prove_plonk_with_poseidon, verify_plonk_with_poseidon,
+        prove_plonk_with_poseidon, verify_plonk_with_poseidon, PlonkWithPoseidonProof,
     };
     use crate::examples::plonk_with_poseidon::plonk::{
         prove_plonk_with_accelerator, PlonkWithAcceleratorCircuitTrace,
@@ -776,5 +776,28 @@ mod test {
             &mut poseidon,
         );
         verify_plonk_with_poseidon::<Blake2sMerkleChannel>(proof, config).unwrap();
+    }
+
+    #[test]
+    fn test_joint_proof_serialize_poseidon31() {
+        let (plonk, mut poseidon) = generate_test_circuit();
+        let config = PcsConfig {
+            pow_bits: 20,
+            fri_config: FriConfig::new(3, 5, 16),
+        };
+
+        let proof = prove_plonk_with_poseidon::<Poseidon31MerkleChannel>(
+            plonk.mult.length.ilog2(),
+            poseidon.control_flow.sel_1.len().ilog2(),
+            config,
+            &plonk,
+            &mut poseidon,
+        );
+
+        let encoded = bincode::serialize(&proof).unwrap();
+
+        let decoded: PlonkWithPoseidonProof<Poseidon31MerkleHasher> =
+            bincode::deserialize(&encoded).unwrap();
+        verify_plonk_with_poseidon::<Poseidon31MerkleChannel>(decoded, config).unwrap();
     }
 }

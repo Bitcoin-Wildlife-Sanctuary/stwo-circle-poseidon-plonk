@@ -40,7 +40,7 @@ pub struct PlonkWithPoseidonStatement0 {
 }
 
 impl PlonkWithPoseidonStatement0 {
-    fn log_sizes(&self) -> TreeVec<Vec<u32>> {
+    pub fn log_sizes(&self) -> TreeVec<Vec<u32>> {
         let mut sizes = TreeVec::new(vec![vec![], vec![], vec![]]);
 
         let log_size_plonk = self.log_size_plonk;
@@ -58,7 +58,7 @@ impl PlonkWithPoseidonStatement0 {
         sizes
     }
 
-    fn mix_into(&self, channel: &mut impl Channel) {
+    pub fn mix_into(&self, channel: &mut impl Channel) {
         channel.mix_u64(self.log_size_plonk as u64);
         channel.mix_u64(self.log_size_poseidon as u64);
     }
@@ -71,7 +71,7 @@ pub struct PlonkWithPoseidonStatement1 {
 }
 
 impl PlonkWithPoseidonStatement1 {
-    fn mix_into(&self, channel: &mut impl Channel) {
+    pub fn mix_into(&self, channel: &mut impl Channel) {
         channel.mix_felts(&[self.plonk_total_sum, self.poseidon_total_sum]);
     }
 }
@@ -89,7 +89,7 @@ pub struct PlonkWithPoseidonComponents {
 }
 
 impl PlonkWithPoseidonComponents {
-    fn new(
+    pub fn new(
         stmt0: &PlonkWithPoseidonStatement0,
         lookup_elements: &PlonkWithAcceleratorLookupElements,
         stmt1: &PlonkWithPoseidonStatement1,
@@ -138,14 +138,14 @@ impl PlonkWithPoseidonComponents {
         }
     }
 
-    fn components(&self) -> Vec<&dyn Component> {
+    pub fn components(&self) -> Vec<&dyn Component> {
         vec![
             &self.plonk as &dyn Component,
             &self.poseidon as &dyn Component,
         ]
     }
 
-    fn component_provers(&self) -> Vec<&dyn ComponentProver<SimdBackend>> {
+    pub fn component_provers(&self) -> Vec<&dyn ComponentProver<SimdBackend>> {
         vec![
             &self.plonk as &dyn ComponentProver<SimdBackend>,
             &self.poseidon as &dyn ComponentProver<SimdBackend>,

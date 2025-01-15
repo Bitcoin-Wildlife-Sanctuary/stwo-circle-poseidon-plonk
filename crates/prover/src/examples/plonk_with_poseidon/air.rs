@@ -35,8 +35,8 @@ use crate::examples::plonk_with_poseidon::{plonk, poseidon};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PlonkWithPoseidonStatement0 {
-    log_size_plonk: u32,
-    log_size_poseidon: u32,
+    pub log_size_plonk: u32,
+    pub log_size_poseidon: u32,
 }
 
 impl PlonkWithPoseidonStatement0 {
@@ -78,9 +78,9 @@ impl PlonkWithPoseidonStatement1 {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PlonkWithPoseidonProof<H: MerkleHasher> {
-    stmt0: PlonkWithPoseidonStatement0,
-    stmt1: PlonkWithPoseidonStatement1,
-    stark_proof: StarkProof<H>,
+    pub stmt0: PlonkWithPoseidonStatement0,
+    pub stmt1: PlonkWithPoseidonStatement1,
+    pub stark_proof: StarkProof<H>,
 }
 
 pub struct PlonkWithPoseidonComponents {

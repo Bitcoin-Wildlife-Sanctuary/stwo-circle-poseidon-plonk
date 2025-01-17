@@ -1,7 +1,7 @@
 use std::cmp::max;
 
 use itertools::{chain, Itertools};
-use num_traits::{One, Zero};
+use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use tracing::{span, Level};
 
@@ -16,7 +16,7 @@ use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::BackendForChannel;
 use crate::core::channel::{Channel, MerkleChannel};
 use crate::core::fields::m31::M31;
-use crate::core::fields::qm31::SecureField;
+use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::fields::FieldExpOps;
 use crate::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, PcsConfig, TreeVec};
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
@@ -293,6 +293,7 @@ pub fn verify_plonk_with_poseidon<MC: MerkleChannel>(
         stark_proof,
     }: PlonkWithPoseidonProof<MC::H>,
     config: PcsConfig,
+    inputs: &[(usize, QM31)],
 ) -> Result<(), VerificationError> {
     let channel = &mut MC::C::default();
     let commitment_scheme = &mut CommitmentSchemeVerifier::<MC>::new(config);
@@ -314,9 +315,15 @@ pub fn verify_plonk_with_poseidon<MC: MerkleChannel>(
     commitment_scheme.commit(stark_proof.commitments[2], &log_sizes[2], channel);
 
     let components = PlonkWithPoseidonComponents::new(&stmt0, &lookup_elements, &stmt1);
-    let one_sum: SecureField = lookup_elements.combine(&[M31::one(), M31::one()]);
 
-    let total_sum = stmt1.plonk_total_sum + one_sum.inverse() + stmt1.poseidon_total_sum;
+    let mut input_sum = SecureField::zero();
+    for &(i, v) in inputs.iter() {
+        let sum: SecureField =
+            lookup_elements.combine(&[M31::from(i), v.0 .0, v.0 .1, v.1 .0, v.1 .1]);
+        input_sum += sum.inverse();
+    }
+
+    let total_sum = stmt1.plonk_total_sum + input_sum + stmt1.poseidon_total_sum;
     assert_eq!(total_sum, SecureField::zero());
 
     verify(
@@ -801,7 +808,8 @@ mod test {
             &plonk,
             &mut poseidon,
         );
-        verify_plonk_with_poseidon::<Blake2sMerkleChannel>(proof, config).unwrap();
+        verify_plonk_with_poseidon::<Blake2sMerkleChannel>(proof, config, &[(1, QM31::one())])
+            .unwrap();
     }
 
     #[test]
@@ -809,7 +817,7 @@ mod test {
         let (plonk, mut poseidon) = generate_test_circuit();
         let config = PcsConfig {
             pow_bits: 20,
-            fri_config: FriConfig::new(2, 4, 16),
+            fri_config: FriConfig::new(0, 5, 16),
         };
 
         let proof = prove_plonk_with_poseidon::<Poseidon31MerkleChannel>(
@@ -827,6 +835,7 @@ mod test {
 
         let decoded: PlonkWithPoseidonProof<Poseidon31MerkleHasher> =
             bincode::deserialize(&encoded).unwrap();
-        verify_plonk_with_poseidon::<Poseidon31MerkleChannel>(decoded, config).unwrap();
+        verify_plonk_with_poseidon::<Poseidon31MerkleChannel>(decoded, config, &[(1, QM31::one())])
+            .unwrap();
     }
 }

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ops::{Add, AddAssign, Mul, Sub};
 
 use itertools::Itertools;
@@ -347,45 +346,20 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
     eval.finalize_logup_in_pairs();
 }
 
-pub struct PoseidonDataFlow(pub HashMap<usize, [M31; 8]>);
-
-pub struct PoseidonControlFlow {
-    pub sel_1: Vec<usize>,
-    pub sel_2: Vec<usize>,
-    pub sel_3: Vec<usize>,
-    pub sel_4: Vec<usize>,
+pub struct PoseidonEntry {
+    pub addr: usize,
+    pub sel: usize,
+    pub hash: [M31; 8],
 }
 
-pub struct PoseidonPrescribedFlow {
-    pub addr_1: Vec<usize>,
-    pub addr_2: Vec<usize>,
-    pub addr_3: Vec<usize>,
-    pub addr_4: Vec<usize>,
-}
-
-pub struct PoseidonMetadata {
-    pub prescribed_flow: PoseidonPrescribedFlow,
-    pub control_flow: PoseidonControlFlow,
-    pub data_flow: PoseidonDataFlow,
-}
+#[derive(Default)]
+pub struct PoseidonFlow(pub Vec<(PoseidonEntry, PoseidonEntry, PoseidonEntry, PoseidonEntry)>);
 
 pub fn gen_trace(
-    metadata: &PoseidonMetadata,
+    flow: &PoseidonFlow,
 ) -> ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>> {
-    let prescribed_flow = &metadata.prescribed_flow;
-    let control_flow = &metadata.control_flow;
-    let data_flow = &metadata.data_flow;
-
     // check the length
-    let len = prescribed_flow.addr_1.len();
-    assert_eq!(len, prescribed_flow.addr_2.len());
-    assert_eq!(len, prescribed_flow.addr_3.len());
-    assert_eq!(len, prescribed_flow.addr_4.len());
-    assert_eq!(len, control_flow.sel_1.len());
-    assert_eq!(len, control_flow.sel_2.len());
-    assert_eq!(len, control_flow.sel_3.len());
-    assert_eq!(len, control_flow.sel_4.len());
-
+    let len = flow.0.len();
     // compute the circuit size
     assert!(len.is_power_of_two());
     let log_size = len.ilog2();
@@ -402,57 +376,37 @@ pub fn gen_trace(
 
         // Fill sel_1, sel_2, sel_3, sel_4
         trace[col_index].data[vec_index] = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_1[vec_index * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_index * N_LANES + i].0.sel as u32)
         }));
         col_index += 1;
         trace[col_index].data[vec_index] = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_2[vec_index * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_index * N_LANES + i].1.sel as u32)
         }));
         col_index += 1;
         trace[col_index].data[vec_index] = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_3[vec_index * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_index * N_LANES + i].2.sel as u32)
         }));
         col_index += 1;
         trace[col_index].data[vec_index] = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_4[vec_index * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_index * N_LANES + i].3.sel as u32)
         }));
         col_index += 1;
 
         // Fill sel_1_inv, sel_2_inv, sel_3_inv, sel_4_inv
-        trace[col_index].data[vec_index] =
-            pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
-                BaseField::from_u32_unchecked(control_flow.sel_1[vec_index * N_LANES + i] as u32)
-            })));
+        trace[col_index].data[vec_index] = pow2147483645(trace[col_index - 4].data[vec_index]);
         col_index += 1;
-        trace[col_index].data[vec_index] =
-            pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
-                BaseField::from_u32_unchecked(control_flow.sel_2[vec_index * N_LANES + i] as u32)
-            })));
+        trace[col_index].data[vec_index] = pow2147483645(trace[col_index - 4].data[vec_index]);
         col_index += 1;
-        trace[col_index].data[vec_index] =
-            pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
-                BaseField::from_u32_unchecked(control_flow.sel_3[vec_index * N_LANES + i] as u32)
-            })));
+        trace[col_index].data[vec_index] = pow2147483645(trace[col_index - 4].data[vec_index]);
         col_index += 1;
-        trace[col_index].data[vec_index] =
-            pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
-                BaseField::from_u32_unchecked(control_flow.sel_4[vec_index * N_LANES + i] as u32)
-            })));
+        trace[col_index].data[vec_index] = pow2147483645(trace[col_index - 4].data[vec_index]);
         col_index += 1;
 
         // Initial state.
-        let input_left: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
-            *data_flow
-                .0
-                .get(&control_flow.sel_1[vec_index * N_LANES + i])
-                .unwrap()
-        });
-        let input_right: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
-            *data_flow
-                .0
-                .get(&control_flow.sel_2[vec_index * N_LANES + i])
-                .unwrap()
-        });
+        let input_left: [[M31; 8]; N_LANES] =
+            std::array::from_fn(|i| flow.0[vec_index * N_LANES + i].0.hash);
+        let input_right: [[M31; 8]; N_LANES] =
+            std::array::from_fn(|i| flow.0[vec_index * N_LANES + i].1.hash);
 
         let mut state: [_; N_STATE] = std::array::from_fn(|state_i| {
             if state_i < 8 {
@@ -671,25 +625,14 @@ pub fn check_trace(trace: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, Bi
 }
 
 pub fn gen_interaction_trace(
-    metadata: &PoseidonMetadata,
+    flow: &PoseidonFlow,
     lookup_elements: &PlonkWithAcceleratorLookupElements,
 ) -> (
     ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
     SecureField,
 ) {
-    let prescribed_flow = &metadata.prescribed_flow;
-    let control_flow = &metadata.control_flow;
-    let data_flow = &metadata.data_flow;
-
     // check the length
-    let len = prescribed_flow.addr_1.len();
-    assert_eq!(len, prescribed_flow.addr_2.len());
-    assert_eq!(len, prescribed_flow.addr_3.len());
-    assert_eq!(len, prescribed_flow.addr_4.len());
-    assert_eq!(len, control_flow.sel_1.len());
-    assert_eq!(len, control_flow.sel_2.len());
-    assert_eq!(len, control_flow.sel_3.len());
-    assert_eq!(len, control_flow.sel_4.len());
+    let len = flow.0.len();
 
     // compute the circuit size
     assert!(len.is_power_of_two());
@@ -703,18 +646,18 @@ pub fn gen_interaction_trace(
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let addr_1 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(prescribed_flow.addr_1[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].0.addr as u32)
         }));
         let sel_1 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_1[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].0.sel as u32)
         }));
         let denom0: PackedSecureField = lookup_elements.combine(&[addr_1, sel_1]);
 
         let addr_2 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(prescribed_flow.addr_2[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].1.addr as u32)
         }));
         let sel_2 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_2[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].1.sel as u32)
         }));
         let denom1: PackedSecureField = lookup_elements.combine(&[addr_2, sel_2]);
 
@@ -726,18 +669,18 @@ pub fn gen_interaction_trace(
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let addr_3 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(prescribed_flow.addr_3[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].2.addr as u32)
         }));
         let sel_3 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_3[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].2.sel as u32)
         }));
         let denom0: PackedSecureField = lookup_elements.combine(&[addr_3, sel_3]);
 
         let addr_4 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(prescribed_flow.addr_4[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].3.addr as u32)
         }));
         let sel_4 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_4[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].3.sel as u32)
         }));
         let denom1: PackedSecureField = lookup_elements.combine(&[addr_4, sel_4]);
 
@@ -749,33 +692,19 @@ pub fn gen_interaction_trace(
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let sel_1 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_1[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].0.sel as u32)
         }));
-        let sel_1_inv = pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_1[vec_row * N_LANES + i] as u32)
-        })));
+        let sel_1_inv = pow2147483645(sel_1);
         let is_sel_1_nonzero = sel_1 * sel_1_inv;
         let sel_2 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_2[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].1.sel as u32)
         }));
-        let sel_2_inv = pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_2[vec_row * N_LANES + i] as u32)
-        })));
+        let sel_2_inv = pow2147483645(sel_2);
         let is_sel_2_nonzero = sel_2 * sel_2_inv;
-        let src_1: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
-            let r = data_flow
-                .0
-                .get(&control_flow.sel_1[vec_row * N_LANES + i])
-                .unwrap();
-            r.clone()
-        });
-        let src_2: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
-            let r = data_flow
-                .0
-                .get(&control_flow.sel_2[vec_row * N_LANES + i])
-                .unwrap();
-            r.clone()
-        });
+        let src_1: [[M31; 8]; N_LANES] =
+            std::array::from_fn(|i| flow.0[vec_row * N_LANES + i].0.hash);
+        let src_2: [[M31; 8]; N_LANES] =
+            std::array::from_fn(|i| flow.0[vec_row * N_LANES + i].1.hash);
         let mut denom0_arr = Vec::with_capacity(9);
         denom0_arr.push(-sel_1);
         for j in 0..8 {
@@ -800,33 +729,19 @@ pub fn gen_interaction_trace(
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let sel_3 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_3[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].2.sel as u32)
         }));
-        let sel_3_inv = pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_3[vec_row * N_LANES + i] as u32)
-        })));
+        let sel_3_inv = pow2147483645(sel_3);
         let is_sel_3_nonzero = sel_3 * sel_3_inv;
         let sel_4 = PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_4[vec_row * N_LANES + i] as u32)
+            BaseField::from_u32_unchecked(flow.0[vec_row * N_LANES + i].3.sel as u32)
         }));
-        let sel_4_inv = pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
-            BaseField::from_u32_unchecked(control_flow.sel_4[vec_row * N_LANES + i] as u32)
-        })));
+        let sel_4_inv = pow2147483645(sel_4);
         let is_sel_4_nonzero = sel_4 * sel_4_inv;
-        let src_3: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
-            let r = data_flow
-                .0
-                .get(&control_flow.sel_3[vec_row * N_LANES + i])
-                .unwrap();
-            r.clone()
-        });
-        let src_4: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
-            let r = data_flow
-                .0
-                .get(&control_flow.sel_4[vec_row * N_LANES + i])
-                .unwrap();
-            r.clone()
-        });
+        let src_3: [[M31; 8]; N_LANES] =
+            std::array::from_fn(|i| flow.0[vec_row * N_LANES + i].2.hash);
+        let src_4: [[M31; 8]; N_LANES] =
+            std::array::from_fn(|i| flow.0[vec_row * N_LANES + i].3.hash);
         let mut denom0_arr = Vec::with_capacity(9);
         denom0_arr.push(-sel_3);
         for j in 0..8 {
@@ -974,27 +889,33 @@ pub fn check_interaction_trace(
 }
 
 pub fn gen_constant_trace(
-    metadata: &PoseidonMetadata,
+    flow: &PoseidonFlow,
 ) -> ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>> {
-    let prescribed_flow = &metadata.prescribed_flow;
-    let log_n_rows = prescribed_flow.addr_1.len().ilog2();
+    let log_n_rows = flow.0.len().ilog2();
 
-    let mut res = [
-        prescribed_flow.addr_1.clone(),
-        prescribed_flow.addr_2.clone(),
-        prescribed_flow.addr_3.clone(),
-        prescribed_flow.addr_4.clone(),
-    ]
-    .into_iter()
-    .map(|col| {
-        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
-            CanonicCoset::new(log_n_rows).circle_domain(),
-            col.iter()
-                .map(|x| BaseField::from_u32_unchecked(*x as u32))
-                .collect(),
-        )
-    })
-    .collect_vec();
+    let mut addr_1 = Vec::with_capacity(1 << log_n_rows);
+    let mut addr_2 = Vec::with_capacity(1 << log_n_rows);
+    let mut addr_3 = Vec::with_capacity(1 << log_n_rows);
+    let mut addr_4 = Vec::with_capacity(1 << log_n_rows);
+
+    for entry in flow.0.iter() {
+        addr_1.push(entry.0.addr);
+        addr_2.push(entry.1.addr);
+        addr_3.push(entry.2.addr);
+        addr_4.push(entry.3.addr);
+    }
+
+    let mut res = [addr_1, addr_2, addr_3, addr_4]
+        .into_iter()
+        .map(|col| {
+            CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
+                CanonicCoset::new(log_n_rows).circle_domain(),
+                col.iter()
+                    .map(|x| BaseField::from_u32_unchecked(*x as u32))
+                    .collect(),
+            )
+        })
+        .collect_vec();
     res.push(gen_is_first(log_n_rows));
     res
 }
@@ -1002,7 +923,7 @@ pub fn gen_constant_trace(
 pub fn prove_poseidon_accelerator<MC: MerkleChannel>(
     log_n_rows: u32,
     config: PcsConfig,
-    metadata: &mut PoseidonMetadata,
+    flow: &mut PoseidonFlow,
 ) -> (PoseidonAcceleratorComponent, StarkProof<MC::H>)
 where
     SimdBackend: BackendForChannel<MC>,
@@ -1023,9 +944,9 @@ where
     let channel = &mut MC::C::default();
     let mut commitment_scheme = CommitmentSchemeProver::<_, MC>::new(config, &twiddles);
 
-    let trace = gen_trace(metadata);
+    let trace = gen_trace(flow);
     check_trace(&trace);
-    let constant_trace = gen_constant_trace(metadata);
+    let constant_trace = gen_constant_trace(flow);
 
     // Preprocessed trace.
     let span = span!(Level::INFO, "Constant").entered();
@@ -1046,7 +967,7 @@ where
 
     // Interaction trace.
     let span = span!(Level::INFO, "Interaction").entered();
-    let (interaction_trace, total_sum) = gen_interaction_trace(metadata, &lookup_elements);
+    let (interaction_trace, total_sum) = gen_interaction_trace(flow, &lookup_elements);
     check_interaction_trace(
         &trace,
         &interaction_trace,
@@ -1145,139 +1066,74 @@ pub fn prove_test_poseidon_accelerator(
     assert!(log_n_rows >= LOG_N_LANES);
     let n_rows = (1 << log_n_rows) as usize;
 
-    let mut data_flow = PoseidonDataFlow(HashMap::new());
-    data_flow.0.insert(123001, CONSTANT_1);
-    data_flow.0.insert(123002, CONSTANT_2);
-    data_flow.0.insert(123003, CONSTANT_3);
-    data_flow.0.insert(256001, TEST_1);
-    data_flow.0.insert(256002, TEST_2);
-    data_flow.0.insert(256003, TEST_3);
-    data_flow.0.insert(256004, TEST_4);
+    let mut flow = PoseidonFlow::default();
 
-    let prescribed_flow = PoseidonPrescribedFlow {
-        addr_1: vec![456001; n_rows],
-        addr_2: vec![456001; n_rows],
-        addr_3: vec![456002; n_rows],
-        addr_4: vec![456003; n_rows],
-    };
-
-    let (sel_1, sel_2, sel_3, sel_4) = {
-        let mut sel_1 = Vec::with_capacity(n_rows);
-        let mut sel_2 = Vec::with_capacity(n_rows);
-        let mut sel_3 = Vec::with_capacity(n_rows);
-        let mut sel_4 = Vec::with_capacity(n_rows);
-
-        let mut prng = SmallRng::seed_from_u64(0);
-        for _ in 0..n_rows {
-            if prng.gen::<bool>() == true {
-                sel_1.push(123001);
-                sel_2.push(123001);
-                sel_3.push(123002);
-                sel_4.push(123003);
-            } else {
-                sel_1.push(256001);
-                sel_2.push(256002);
-                sel_3.push(256003);
-                sel_4.push(256004);
-            }
+    let mut prng = SmallRng::seed_from_u64(0);
+    for _ in 0..n_rows {
+        if prng.gen::<bool>() == true {
+            flow.0.push((
+                PoseidonEntry {
+                    addr: 456001,
+                    sel: 123001,
+                    hash: CONSTANT_1,
+                },
+                PoseidonEntry {
+                    addr: 456001,
+                    sel: 123001,
+                    hash: CONSTANT_1,
+                },
+                PoseidonEntry {
+                    addr: 456002,
+                    sel: 123002,
+                    hash: CONSTANT_2,
+                },
+                PoseidonEntry {
+                    addr: 456003,
+                    sel: 123003,
+                    hash: CONSTANT_3,
+                },
+            ));
+        } else {
+            flow.0.push((
+                PoseidonEntry {
+                    addr: 456101,
+                    sel: 256001,
+                    hash: TEST_1,
+                },
+                PoseidonEntry {
+                    addr: 456102,
+                    sel: 256002,
+                    hash: TEST_2,
+                },
+                PoseidonEntry {
+                    addr: 456103,
+                    sel: 256003,
+                    hash: TEST_3,
+                },
+                PoseidonEntry {
+                    addr: 456104,
+                    sel: 256004,
+                    hash: TEST_4,
+                },
+            ));
         }
-        (sel_1, sel_2, sel_3, sel_4)
-    };
+    }
 
-    let control_flow = PoseidonControlFlow {
-        sel_1,
-        sel_2,
-        sel_3,
-        sel_4,
-    };
-
-    let mut metadata = PoseidonMetadata {
-        prescribed_flow,
-        control_flow,
-        data_flow,
-    };
-
-    prove_poseidon_accelerator::<Blake2sMerkleChannel>(log_n_rows, config, &mut metadata)
+    prove_poseidon_accelerator::<Blake2sMerkleChannel>(log_n_rows, config, &mut flow)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::env;
 
-    use itertools::Itertools;
-
-    use crate::constraint_framework::assert_constraints;
     use crate::core::air::Component;
     use crate::core::channel::Blake2sChannel;
     use crate::core::fri::FriConfig;
-    use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
-    use crate::core::poly::circle::CanonicCoset;
+    use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
     use crate::core::prover::verify;
     use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use crate::examples::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
-    use crate::examples::plonk_with_poseidon::poseidon::{
-        check_interaction_trace, check_trace, eval_poseidon_constraints, gen_constant_trace,
-        gen_interaction_trace, gen_trace, prove_test_poseidon_accelerator, PoseidonControlFlow,
-        PoseidonDataFlow, PoseidonMetadata, PoseidonPrescribedFlow, CONSTANT_1, CONSTANT_2,
-        CONSTANT_3,
-    };
-
-    fn get_test_metadata() -> PoseidonMetadata {
-        let mut data_flow = PoseidonDataFlow(HashMap::new());
-        data_flow.0.insert(123001, CONSTANT_1);
-        data_flow.0.insert(123002, CONSTANT_2);
-        data_flow.0.insert(123003, CONSTANT_3);
-
-        let prescribed_flow = PoseidonPrescribedFlow {
-            addr_1: vec![456001; 16],
-            addr_2: vec![456001; 16],
-            addr_3: vec![456002; 16],
-            addr_4: vec![456003; 16],
-        };
-
-        let control_flow = PoseidonControlFlow {
-            sel_1: vec![123001; 16],
-            sel_2: vec![123001; 16],
-            sel_3: vec![123002; 16],
-            sel_4: vec![123003; 16],
-        };
-
-        PoseidonMetadata {
-            prescribed_flow,
-            control_flow,
-            data_flow,
-        }
-    }
-
-    #[test]
-    fn test_poseidon_trace() {
-        let metadata = get_test_metadata();
-        let trace = gen_trace(&metadata);
-        check_trace(&trace);
-
-        let log_n_rows = metadata.prescribed_flow.addr_1.len().ilog2();
-
-        let mut channel = Blake2sChannel::default();
-        let lookup_elements = PlonkWithAcceleratorLookupElements::draw(&mut channel);
-
-        let constant = gen_constant_trace(&metadata);
-
-        let (interaction, total_sum) = gen_interaction_trace(&metadata, &lookup_elements);
-        check_interaction_trace(&trace, &interaction, &constant, &lookup_elements, total_sum);
-
-        let traces = TreeVec::new(vec![constant, trace, interaction]);
-        let trace_polys =
-            traces.map(|trace| trace.into_iter().map(|c| c.interpolate()).collect_vec());
-        assert_constraints(
-            &trace_polys,
-            CanonicCoset::new(log_n_rows),
-            |mut eval| {
-                eval_poseidon_constraints(&mut eval, &lookup_elements);
-            },
-            (total_sum, None),
-        );
-    }
+    use crate::examples::plonk_with_poseidon::poseidon::prove_test_poseidon_accelerator;
 
     #[test_log::test]
     fn test_simd_poseidon_prove() {

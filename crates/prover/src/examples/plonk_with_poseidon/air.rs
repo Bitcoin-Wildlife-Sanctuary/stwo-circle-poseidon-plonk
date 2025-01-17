@@ -29,7 +29,7 @@ use crate::examples::plonk_with_poseidon::plonk::{
 };
 use crate::examples::plonk_with_poseidon::poseidon::{
     check_interaction_trace, check_trace, PoseidonAcceleratorComponent, PoseidonAcceleratorEval,
-    PoseidonMetadata,
+    PoseidonFlow,
 };
 use crate::examples::plonk_with_poseidon::{plonk, poseidon};
 
@@ -161,7 +161,7 @@ pub fn prove_plonk_with_poseidon<MC: MerkleChannel>(
     log_size_poseidon: u32,
     config: PcsConfig,
     circuit: &PlonkWithAcceleratorCircuitTrace,
-    metadata: &mut PoseidonMetadata,
+    flow: &mut PoseidonFlow,
 ) -> PlonkWithPoseidonProof<MC::H>
 where
     SimdBackend: BackendForChannel<MC>,
@@ -169,10 +169,7 @@ where
     assert!(log_size_plonk >= LOG_N_LANES);
     assert!(log_size_poseidon >= LOG_N_LANES);
     assert_eq!(circuit.mult_c.length, 1 << log_size_plonk);
-    assert_eq!(
-        metadata.prescribed_flow.addr_1.len(),
-        1 << log_size_poseidon
-    );
+    assert_eq!(flow.0.len(), 1 << log_size_poseidon);
 
     // Precompute twiddles.
     let span = span!(Level::INFO, "Precompute twiddles").entered();
@@ -211,9 +208,9 @@ where
     .collect_vec();
     plonk_constant_trace.push(is_first);
 
-    let poseidon_trace = poseidon::gen_trace(metadata);
+    let poseidon_trace = poseidon::gen_trace(flow);
     check_trace(&poseidon_trace);
-    let poseidon_constant_trace = poseidon::gen_constant_trace(metadata);
+    let poseidon_constant_trace = poseidon::gen_constant_trace(flow);
 
     // Preprocessed trace.
     let span = span!(Level::INFO, "Constant").entered();
@@ -249,7 +246,7 @@ where
     let (plonk_interaction_trace, plonk_total_sum) =
         plonk::gen_interaction_trace(log_size_plonk, &circuit, &lookup_elements);
     let (poseidon_interaction_trace, poseidon_total_sum) =
-        poseidon::gen_interaction_trace(metadata, &lookup_elements);
+        poseidon::gen_interaction_trace(flow, &lookup_elements);
     check_interaction_trace(
         &poseidon_trace,
         &poseidon_interaction_trace,
@@ -333,6 +330,8 @@ pub fn verify_plonk_with_poseidon<MC: MerkleChannel>(
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::Write;
     use std::ops::Neg;
 
     use num_traits::{One, Zero};
@@ -354,11 +353,10 @@ mod test {
         PlonkWithAcceleratorLookupElements,
     };
     use crate::examples::plonk_with_poseidon::poseidon::{
-        prove_poseidon_accelerator, PoseidonControlFlow, PoseidonDataFlow, PoseidonMetadata,
-        PoseidonPrescribedFlow, CONSTANT_1, CONSTANT_2, CONSTANT_3,
+        prove_poseidon_accelerator, PoseidonEntry, PoseidonFlow, CONSTANT_1, CONSTANT_2, CONSTANT_3,
     };
 
-    fn generate_test_circuit() -> (PlonkWithAcceleratorCircuitTrace, PoseidonMetadata) {
+    fn generate_test_circuit() -> (PlonkWithAcceleratorCircuitTrace, PoseidonFlow) {
         // Additional test constants
         const TEST_1: [BaseField; 8] = [
             BaseField::from_u32_unchecked(0),
@@ -622,69 +620,59 @@ mod test {
             c_val_3: range.clone().map(|i| variables[c_wire[i]].1 .1).collect(),
         };
 
-        let mut data_flow = PoseidonDataFlow(HashMap::new());
-        data_flow.0.insert(constant_idx[0], CONSTANT_1);
-        data_flow.0.insert(constant_idx[1], CONSTANT_2);
-        data_flow.0.insert(constant_idx[2], CONSTANT_3);
-        data_flow.0.insert(hash_idx[0], TEST_1);
-        data_flow.0.insert(hash_idx[1], TEST_2);
-        data_flow.0.insert(hash_idx[2], TEST_3);
-        data_flow.0.insert(hash_idx[3], TEST_4);
-
-        let mut prescribed_flow = PoseidonPrescribedFlow {
-            addr_1: vec![],
-            addr_2: vec![],
-            addr_3: vec![],
-            addr_4: vec![],
-        };
-        let mut control_flow = PoseidonControlFlow {
-            sel_1: vec![],
-            sel_2: vec![],
-            sel_3: vec![],
-            sel_4: vec![],
-        };
-
-        {
-            for i in 0..32 {
-                if i % 2 == 0 {
-                    prescribed_flow.addr_1.push(addr_hash_idx[0]);
-                    prescribed_flow.addr_2.push(addr_hash_idx[1]);
-                    prescribed_flow.addr_3.push(addr_hash_idx[2]);
-                    prescribed_flow.addr_4.push(addr_hash_idx[3]);
-
-                    control_flow.sel_1.push(hash_idx[0]);
-                    control_flow.sel_2.push(hash_idx[1]);
-                    control_flow.sel_3.push(hash_idx[2]);
-                    control_flow.sel_4.push(hash_idx[3]);
-                } else {
-                    prescribed_flow.addr_1.push(addr_constant_idx[0]);
-                    prescribed_flow.addr_2.push(addr_constant_idx[0]);
-                    prescribed_flow.addr_3.push(addr_constant_idx[1]);
-                    prescribed_flow.addr_4.push(addr_constant_idx[2]);
-
-                    control_flow.sel_1.push(constant_idx[0]);
-                    control_flow.sel_2.push(constant_idx[0]);
-                    control_flow.sel_3.push(constant_idx[1]);
-                    control_flow.sel_4.push(constant_idx[2]);
-                }
+        let mut flow = PoseidonFlow::default();
+        for i in 0..32 {
+            if i % 2 == 0 {
+                flow.0.push((
+                    PoseidonEntry {
+                        addr: addr_hash_idx[0],
+                        sel: hash_idx[0],
+                        hash: TEST_1,
+                    },
+                    PoseidonEntry {
+                        addr: addr_hash_idx[1],
+                        sel: hash_idx[1],
+                        hash: TEST_2,
+                    },
+                    PoseidonEntry {
+                        addr: addr_hash_idx[2],
+                        sel: hash_idx[2],
+                        hash: TEST_3,
+                    },
+                    PoseidonEntry {
+                        addr: addr_hash_idx[3],
+                        sel: hash_idx[3],
+                        hash: TEST_4,
+                    },
+                ));
+            } else {
+                flow.0.push((
+                    PoseidonEntry {
+                        addr: addr_constant_idx[0],
+                        sel: constant_idx[0],
+                        hash: CONSTANT_1,
+                    },
+                    PoseidonEntry {
+                        addr: addr_constant_idx[0],
+                        sel: constant_idx[0],
+                        hash: CONSTANT_1,
+                    },
+                    PoseidonEntry {
+                        addr: addr_constant_idx[1],
+                        sel: constant_idx[1],
+                        hash: CONSTANT_2,
+                    },
+                    PoseidonEntry {
+                        addr: addr_constant_idx[2],
+                        sel: constant_idx[2],
+                        hash: CONSTANT_3,
+                    },
+                ));
             }
         }
 
-        let metadata = PoseidonMetadata {
-            prescribed_flow,
-            control_flow,
-            data_flow,
-        };
-
-        for r in [
-            &metadata.prescribed_flow.addr_1,
-            &metadata.prescribed_flow.addr_2,
-            &metadata.prescribed_flow.addr_3,
-            &metadata.prescribed_flow.addr_4,
-        ]
-        .iter()
-        {
-            for &v in r.iter() {
+        for r in flow.0.iter() {
+            for &v in [r.0.addr, r.1.addr, r.2.addr, r.3.addr].iter() {
                 let p = counts.get(&v).unwrap();
                 counts.insert(v, *p + 1);
             }
@@ -704,24 +692,19 @@ mod test {
         for (i, &v) in mult_poseidon.iter().enumerate() {
             counts_poseidon.insert(c_wire[i], v);
         }
-        for r in [
-            &metadata.control_flow.sel_1,
-            &metadata.control_flow.sel_2,
-            &metadata.control_flow.sel_3,
-            &metadata.control_flow.sel_4,
-        ]
-        .iter()
-        {
-            for &v in r.iter() {
-                let p = counts_poseidon.get(&v).unwrap();
-                counts_poseidon.insert(v, *p - 1);
+        for r in flow.0.iter() {
+            for &v in [r.0.sel, r.1.sel, r.2.sel, r.3.sel].iter() {
+                if v != 0 {
+                    let p = counts_poseidon.get(&v).unwrap();
+                    counts_poseidon.insert(v, *p - 1);
+                }
             }
         }
         for (_, &v) in counts_poseidon.iter() {
             assert!(v.is_zero());
         }
 
-        (circuit, metadata)
+        (circuit, flow)
     }
 
     #[test]
@@ -739,7 +722,7 @@ mod test {
         );
 
         let (poseidon_component, poseidon_proof) = prove_poseidon_accelerator::<Blake2sMerkleChannel>(
-            poseidon.control_flow.sel_1.len().ilog2(),
+            poseidon.0.len().ilog2(),
             config,
             &mut poseidon,
         );
@@ -813,7 +796,7 @@ mod test {
 
         let proof = prove_plonk_with_poseidon::<Blake2sMerkleChannel>(
             plonk.mult_c.length.ilog2(),
-            poseidon.control_flow.sel_1.len().ilog2(),
+            poseidon.0.len().ilog2(),
             config,
             &plonk,
             &mut poseidon,
@@ -831,13 +814,16 @@ mod test {
 
         let proof = prove_plonk_with_poseidon::<Poseidon31MerkleChannel>(
             plonk.mult_c.length.ilog2(),
-            poseidon.control_flow.sel_1.len().ilog2(),
+            poseidon.0.len().ilog2(),
             config,
             &plonk,
             &mut poseidon,
         );
 
         let encoded = bincode::serialize(&proof).unwrap();
+
+        let mut file = File::create("joint_proof.bin").unwrap();
+        file.write_all(&encoded).unwrap();
 
         let decoded: PlonkWithPoseidonProof<Poseidon31MerkleHasher> =
             bincode::deserialize(&encoded).unwrap();

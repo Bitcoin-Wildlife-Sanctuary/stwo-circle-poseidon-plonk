@@ -46,11 +46,11 @@ impl PlonkWithPoseidonStatement0 {
         let log_size_plonk = self.log_size_plonk;
         let log_size_poseidon = self.log_size_poseidon;
 
-        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 7]);
+        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 10]);
         sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 5]);
 
-        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 3]);
-        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 162]);
+        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 12]);
+        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 166]);
 
         sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_plonk; 8]);
         sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 16]);
@@ -103,6 +103,9 @@ impl PlonkWithPoseidonComponents {
                     PreprocessedColumn::Plonk(3),
                     PreprocessedColumn::Plonk(4),
                     PreprocessedColumn::Plonk(5),
+                    PreprocessedColumn::Plonk(6),
+                    PreprocessedColumn::Plonk(7),
+                    PreprocessedColumn::Plonk(8),
                     PreprocessedColumn::IsFirst(stmt0.log_size_plonk as u32),
                 ],
                 [
@@ -165,7 +168,7 @@ where
 {
     assert!(log_size_plonk >= LOG_N_LANES);
     assert!(log_size_poseidon >= LOG_N_LANES);
-    assert_eq!(circuit.mult.length, 1 << log_size_plonk);
+    assert_eq!(circuit.mult_c.length, 1 << log_size_plonk);
     assert_eq!(
         metadata.prescribed_flow.addr_1.len(),
         1 << log_size_poseidon
@@ -192,14 +195,17 @@ where
         circuit.b_wire.clone(),
         circuit.c_wire.clone(),
         circuit.op.clone(),
-        circuit.mult.clone(),
+        circuit.mult_a.clone(),
+        circuit.mult_b.clone(),
+        circuit.mult_c.clone(),
         circuit.mult_poseidon.clone(),
+        circuit.enforce_c_m31.clone(),
     ]
     .into_iter()
-    .map(|col| {
-        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new_canonical_ordered(
-            CanonicCoset::new(log_size_plonk),
-            col,
+    .map(|eval| {
+        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
+            CanonicCoset::new(log_size_plonk).circle_domain(),
+            eval.clone(),
         )
     })
     .collect_vec();
@@ -313,7 +319,7 @@ pub fn verify_plonk_with_poseidon<MC: MerkleChannel>(
     let components = PlonkWithPoseidonComponents::new(&stmt0, &lookup_elements, &stmt1);
     let one_sum: SecureField = lookup_elements.combine(&[M31::one(), M31::one()]);
 
-    let total_sum = stmt1.plonk_total_sum - one_sum.inverse() + stmt1.poseidon_total_sum;
+    let total_sum = stmt1.plonk_total_sum + one_sum.inverse() + stmt1.poseidon_total_sum;
     assert_eq!(total_sum, SecureField::zero());
 
     verify(
@@ -327,12 +333,14 @@ pub fn verify_plonk_with_poseidon<MC: MerkleChannel>(
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
+    use std::ops::Neg;
 
     use num_traits::{One, Zero};
 
     use crate::core::air::Component;
     use crate::core::channel::Blake2sChannel;
     use crate::core::fields::m31::{BaseField, M31};
+    use crate::core::fields::qm31::QM31;
     use crate::core::fri::FriConfig;
     use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
     use crate::core::prover::verify;
@@ -395,50 +403,66 @@ mod test {
             BaseField::from_u32_unchecked(0x4cc30530),
         ];
 
-        let mut mult = vec![];
+        let mut variables = vec![];
+        let mut push_variable = |v: QM31| {
+            let idx = variables.len();
+            variables.push(v);
+            idx
+        };
+
+        let zero_var = push_variable(QM31::zero());
+        let one_var = push_variable(QM31::one());
+
+        let mut mult_a = vec![];
+        let mut mult_b = vec![];
+        let mut mult_c = vec![];
         let mut mult_poseidon = vec![];
         let mut a_wire = vec![];
         let mut b_wire = vec![];
         let mut c_wire = vec![];
         let mut op = vec![];
-        let mut variables = vec![];
 
         // allocate 0
-        mult.push(3);
+        mult_a.push(1);
+        mult_b.push(1);
+        mult_c.push(-3);
         mult_poseidon.push(0);
-        a_wire.push(0);
-        b_wire.push(0);
-        c_wire.push(0);
+        a_wire.push(zero_var);
+        b_wire.push(zero_var);
+        c_wire.push(zero_var);
         op.push(M31::one());
-        variables.push(M31::zero());
 
         // allocate 1
-        mult.push(0); // intentionally reduced by 1 to request for an input
+        mult_a.push(1);
+        mult_b.push(1);
+        mult_c.push(-2); // intentionally reduced by 1 to request for an input
         mult_poseidon.push(0);
-        a_wire.push(1);
-        b_wire.push(0);
+        a_wire.push(one_var);
+        b_wire.push(zero_var);
+        c_wire.push(one_var);
         op.push(M31::one());
-        variables.push(M31::one());
 
-        let mut cur_idx = 2usize;
         let mut hash_idx = vec![];
 
         // allocate TEST_1 to TEST_4
         for g in [TEST_1, TEST_2, TEST_3, TEST_4] {
-            for i in 0..8 {
-                mult.push(1);
-                mult_poseidon.push(0);
-                if i == 0 {
-                    hash_idx.push(cur_idx);
-                }
-                a_wire.push(cur_idx);
-                b_wire.push(1);
-                op.push(M31::zero());
-                variables.push(g[i]);
+            let a = QM31::from_m31(g[0], g[1], g[2], g[3]);
+            let b = QM31::from_m31(g[4], g[5], g[6], g[7]);
+            let c = a * b;
+            let a_var = push_variable(a);
+            let b_var = push_variable(b);
+            let c_var = push_variable(c);
 
-                mult[1] += 1;
-                cur_idx += 1;
-            }
+            mult_a.push(0);
+            mult_b.push(0);
+            mult_c.push(0);
+            mult_poseidon.push(16);
+            a_wire.push(a_var);
+            b_wire.push(b_var);
+            c_wire.push(c_var);
+            op.push(M31::zero());
+
+            hash_idx.push(c_var);
         }
 
         assert_eq!(hash_idx.len(), 4);
@@ -446,107 +470,110 @@ mod test {
         // allocate the hash_idx addresses
         let mut addr_hash_idx = vec![];
         for idx in hash_idx.iter() {
-            mult.push(1);
-            mult_poseidon.push(0);
-            a_wire.push(cur_idx);
-            b_wire.push(1);
-            op.push(M31::zero());
-            variables.push(M31::from_u32_unchecked(*idx as u32));
+            let idx_var = push_variable(QM31::from(M31::from_u32_unchecked(*idx as u32)));
 
-            addr_hash_idx.push(cur_idx);
-            mult[1] += 1;
-            cur_idx += 1;
+            mult_a.push(1);
+            mult_b.push(1);
+            mult_c.push(-17);
+            mult_poseidon.push(0);
+            a_wire.push(idx_var);
+            b_wire.push(one_var);
+            c_wire.push(idx_var);
+            op.push(M31::zero());
+
+            addr_hash_idx.push(idx_var);
+            mult_c[1] -= 1;
         }
 
         let mut constant_idx = vec![];
         // allocate CONSTANT_1 to CONSTANT_3
-        for g in [CONSTANT_1, CONSTANT_2, CONSTANT_3] {
-            for i in 0..8 {
-                mult.push(1);
-                mult_poseidon.push(0);
-                if i == 0 {
-                    constant_idx.push(cur_idx);
-                }
-                a_wire.push(cur_idx);
-                b_wire.push(1);
-                op.push(M31::zero());
-                variables.push(g[i]);
+        for (i, g) in [CONSTANT_1, CONSTANT_2, CONSTANT_3].iter().enumerate() {
+            let a = QM31::from_m31(g[0], g[1], g[2], g[3]);
+            let b = QM31::from_m31(g[4], g[5], g[6], g[7]);
+            let c = a * b;
+            let a_var = push_variable(a);
+            let b_var = push_variable(b);
+            let c_var = push_variable(c);
 
-                mult[1] += 1;
-                cur_idx += 1;
+            mult_a.push(0);
+            mult_b.push(0);
+            mult_c.push(0);
+            if i == 0 {
+                mult_poseidon.push(32);
+            } else {
+                mult_poseidon.push(16);
             }
+            a_wire.push(a_var);
+            b_wire.push(b_var);
+            c_wire.push(c_var);
+            op.push(M31::zero());
+
+            constant_idx.push(c_var);
         }
 
         // allocate the constant_idx addresses
         let mut addr_constant_idx = vec![];
-        for idx in constant_idx.iter() {
-            mult.push(1);
-            mult_poseidon.push(0);
-            a_wire.push(cur_idx);
-            b_wire.push(1);
-            op.push(M31::zero());
-            variables.push(M31::from_u32_unchecked(*idx as u32));
+        for (i, idx) in constant_idx.iter().enumerate() {
+            let idx_var = push_variable(QM31::from(M31::from_u32_unchecked(*idx as u32)));
 
-            addr_constant_idx.push(cur_idx);
-            mult[1] += 1;
-            cur_idx += 1;
+            mult_a.push(1);
+            mult_b.push(1);
+            if i == 0 {
+                mult_c.push(-33);
+            } else {
+                mult_c.push(-17);
+            }
+            mult_poseidon.push(0);
+            a_wire.push(idx_var);
+            b_wire.push(one_var);
+            c_wire.push(idx_var);
+            op.push(M31::zero());
+
+            addr_constant_idx.push(idx_var);
+            mult_c[1] -= 1;
         }
 
         // assume that Poseidon has 32 gates,
         // 16 of them will be dealing with CONSTANT_1, _2, _3
         // 16 of them will be dealing with TEST_1, _2, _3, _4
-        mult[addr_hash_idx[0]] += 16;
-        mult[addr_hash_idx[1]] += 16;
-        mult[addr_hash_idx[2]] += 16;
-        mult[addr_hash_idx[3]] += 16;
-
-        mult[addr_constant_idx[0]] += 32;
-        mult[addr_constant_idx[1]] += 16;
-        mult[addr_constant_idx[2]] += 16;
-
-        mult_poseidon[hash_idx[0]] += 16;
-        mult_poseidon[hash_idx[1]] += 16;
-        mult_poseidon[hash_idx[2]] += 16;
-        mult_poseidon[hash_idx[3]] += 16;
-
-        mult_poseidon[constant_idx[0]] += 32;
-        mult_poseidon[constant_idx[1]] += 16;
-        mult_poseidon[constant_idx[2]] += 16;
-
-        let len = variables.len();
+        let len = mult_a.len();
         let padded_len = len.next_power_of_two();
 
         for _ in len..padded_len {
-            mult.push(0);
+            mult_a.push(0);
+            mult_b.push(0);
+            mult_c.push(0);
             mult_poseidon.push(0);
             a_wire.push(0);
             b_wire.push(0);
+            c_wire.push(0);
             op.push(M31::zero());
-            variables.push(M31::zero());
-
-            mult[0] += 2;
-            cur_idx += 1;
         }
 
         let mut counts = HashMap::<usize, isize>::new();
-        for (i, &v) in mult.iter().enumerate() {
-            counts.insert(i, v as isize);
+        assert_eq!(a_wire.len(), mult_a.len());
+        for (&i, v) in a_wire.iter().zip(mult_a.iter()) {
+            let p = counts.get(&i).copied().unwrap_or_default();
+            counts.insert(i, p + v);
         }
-        for &v in a_wire.iter() {
-            let p = counts.get(&v).unwrap();
-            counts.insert(v, *p - 1);
+        assert_eq!(b_wire.len(), mult_b.len());
+        for (&i, v) in b_wire.iter().zip(mult_b.iter()) {
+            let p = counts.get(&i).copied().unwrap_or_default();
+            counts.insert(i, p + v);
         }
-        for &v in b_wire.iter() {
-            let p = counts.get(&v).unwrap();
-            counts.insert(v, *p - 1);
+        assert_eq!(c_wire.len(), mult_c.len());
+        for (&i, v) in c_wire.iter().zip(mult_c.iter()) {
+            let p = counts.get(&i).copied().unwrap_or_default();
+            counts.insert(i, p + v);
         }
+
         for (&k, &v) in counts.iter() {
             if !v.is_zero() {
-                if addr_hash_idx.contains(&k) && v == 16 {
+                if addr_hash_idx.contains(&k) && v == -16 {
                     continue;
-                } else if k == addr_constant_idx[0] && v == 32 {
+                } else if k == addr_constant_idx[0] && v == -32 {
                     continue;
-                } else if (k == addr_constant_idx[1] || k == addr_constant_idx[2]) && v == 16 {
+                } else if (k == addr_constant_idx[1] || k == addr_constant_idx[2]) && v == -16 {
                     continue;
                 } else {
                     assert!(
@@ -561,16 +588,38 @@ mod test {
 
         let log_n_rows = padded_len.ilog2();
         let range = 0..(1 << log_n_rows);
+        let isize_to_m31 = |v: isize| {
+            if v.is_negative() {
+                M31::from((-v) as u32).neg()
+            } else {
+                M31::from(v as u32)
+            }
+        };
         let circuit = PlonkWithAcceleratorCircuitTrace {
-            mult: range.clone().map(|i| mult[i].into()).collect(),
-            mult_poseidon: range.clone().map(|i| mult_poseidon[i].into()).collect(),
+            mult_a: range.clone().map(|i| isize_to_m31(mult_a[i])).collect(),
+            mult_b: range.clone().map(|i| isize_to_m31(mult_b[i])).collect(),
+            mult_c: range.clone().map(|i| isize_to_m31(mult_c[i])).collect(),
+            mult_poseidon: range
+                .clone()
+                .map(|i| isize_to_m31(mult_poseidon[i]))
+                .collect(),
+            enforce_c_m31: range.clone().map(|_| 0.into()).collect(),
             a_wire: range.clone().map(|i| a_wire[i].into()).collect(),
             b_wire: range.clone().map(|i| b_wire[i].into()).collect(),
-            c_wire: range.clone().map(|i| i.into()).collect(),
+            c_wire: range.clone().map(|i| c_wire[i].into()).collect(),
             op: range.clone().map(|i| op[i].into()).collect(),
-            a_val: range.clone().map(|i| variables[a_wire[i]].into()).collect(),
-            b_val: range.clone().map(|i| variables[b_wire[i]].into()).collect(),
-            c_val: range.clone().map(|i| variables[i].into()).collect(),
+            a_val_0: range.clone().map(|i| variables[a_wire[i]].0 .0).collect(),
+            a_val_1: range.clone().map(|i| variables[a_wire[i]].0 .1).collect(),
+            a_val_2: range.clone().map(|i| variables[a_wire[i]].1 .0).collect(),
+            a_val_3: range.clone().map(|i| variables[a_wire[i]].1 .1).collect(),
+            b_val_0: range.clone().map(|i| variables[b_wire[i]].0 .0).collect(),
+            b_val_1: range.clone().map(|i| variables[b_wire[i]].0 .1).collect(),
+            b_val_2: range.clone().map(|i| variables[b_wire[i]].1 .0).collect(),
+            b_val_3: range.clone().map(|i| variables[b_wire[i]].1 .1).collect(),
+            c_val_0: range.clone().map(|i| variables[c_wire[i]].0 .0).collect(),
+            c_val_1: range.clone().map(|i| variables[c_wire[i]].0 .1).collect(),
+            c_val_2: range.clone().map(|i| variables[c_wire[i]].1 .0).collect(),
+            c_val_3: range.clone().map(|i| variables[c_wire[i]].1 .1).collect(),
         };
 
         let mut data_flow = PoseidonDataFlow(HashMap::new());
@@ -637,7 +686,7 @@ mod test {
         {
             for &v in r.iter() {
                 let p = counts.get(&v).unwrap();
-                counts.insert(v, *p - 1);
+                counts.insert(v, *p + 1);
             }
         }
         for (&k, &v) in counts.iter() {
@@ -653,7 +702,7 @@ mod test {
 
         let mut counts_poseidon = HashMap::<usize, isize>::new();
         for (i, &v) in mult_poseidon.iter().enumerate() {
-            counts_poseidon.insert(i, v as isize);
+            counts_poseidon.insert(c_wire[i], v);
         }
         for r in [
             &metadata.control_flow.sel_1,
@@ -684,7 +733,7 @@ mod test {
         };
 
         let (plonk_component, plonk_proof) = prove_plonk_with_accelerator::<Blake2sMerkleChannel>(
-            plonk.mult.length.ilog2(),
+            plonk.mult_c.length.ilog2(),
             config,
             &plonk,
         );
@@ -763,7 +812,7 @@ mod test {
         };
 
         let proof = prove_plonk_with_poseidon::<Blake2sMerkleChannel>(
-            plonk.mult.length.ilog2(),
+            plonk.mult_c.length.ilog2(),
             poseidon.control_flow.sel_1.len().ilog2(),
             config,
             &plonk,
@@ -777,11 +826,11 @@ mod test {
         let (plonk, mut poseidon) = generate_test_circuit();
         let config = PcsConfig {
             pow_bits: 20,
-            fri_config: FriConfig::new(0, 5, 16),
+            fri_config: FriConfig::new(2, 4, 16),
         };
 
         let proof = prove_plonk_with_poseidon::<Poseidon31MerkleChannel>(
-            plonk.mult.length.ilog2(),
+            plonk.mult_c.length.ilog2(),
             poseidon.control_flow.sel_1.len().ilog2(),
             config,
             &plonk,

@@ -1,3 +1,5 @@
+use std::cmp::min;
+
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +44,7 @@ impl MerkleHasher for Poseidon31MerkleHasher {
                 res
             } else {
                 let mut res = [zero; 16];
-                for i in 0..16 {
+                for i in 0..min(16, len) {
                     res[i] = column_values[i];
                 }
                 Poseidon31CRH::compress(&res)
@@ -56,7 +58,7 @@ impl MerkleHasher for Poseidon31MerkleHasher {
             }
 
             let remain = len % ELEMENTS_IN_BLOCK;
-            if remain != 0 {
+            if len > 16 && remain != 0 {
                 let mut state = [zero; 16];
                 state[..8].copy_from_slice(&digest);
                 state[8..8 + remain].copy_from_slice(&column_values[len - remain..]);

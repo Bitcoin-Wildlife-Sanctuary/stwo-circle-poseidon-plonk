@@ -18,7 +18,7 @@ use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::{BackendForChannel, Col, Column};
 use crate::core::channel::MerkleChannel;
-use crate::core::fields::m31::{BaseField, M31};
+use crate::core::fields::m31::{pow2147483645, BaseField, M31};
 use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::fields::FieldExpOps;
 use crate::core::pcs::{CommitmentSchemeProver, PcsConfig};
@@ -36,7 +36,7 @@ const N_STATE: usize = 16;
 const N_HALF_FULL_ROUNDS: usize = 4;
 const N_PARTIAL_ROUNDS: usize = 14;
 const FULL_ROUNDS: usize = 2 * N_HALF_FULL_ROUNDS;
-const N_COLUMNS: usize = N_STATE * (1 + FULL_ROUNDS) + N_PARTIAL_ROUNDS + 4;
+const N_COLUMNS: usize = N_STATE * (1 + FULL_ROUNDS) + N_PARTIAL_ROUNDS + 8;
 const LOG_EXPAND: u32 = 2;
 
 pub const CONSTANT_1: [M31; 8] = [M31::from_u32_unchecked(0); 8];
@@ -170,6 +170,21 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
     let sel_3 = eval.next_trace_mask();
     let sel_4 = eval.next_trace_mask();
 
+    let sel_1_inv = eval.next_trace_mask();
+    let sel_2_inv = eval.next_trace_mask();
+    let sel_3_inv = eval.next_trace_mask();
+    let sel_4_inv = eval.next_trace_mask();
+
+    let is_sel_1_nonzero = sel_1.clone() * sel_1_inv;
+    let is_sel_2_nonzero = sel_2.clone() * sel_2_inv;
+    let is_sel_3_nonzero = sel_3.clone() * sel_3_inv;
+    let is_sel_4_nonzero = sel_4.clone() * sel_4_inv;
+
+    eval.add_constraint((-is_sel_1_nonzero.clone() + QM31::one()) * sel_1.clone());
+    eval.add_constraint((-is_sel_2_nonzero.clone() + QM31::one()) * sel_2.clone());
+    eval.add_constraint((-is_sel_3_nonzero.clone() + QM31::one()) * sel_3.clone());
+    eval.add_constraint((-is_sel_4_nonzero.clone() + QM31::one()) * sel_4.clone());
+
     let mut state: [_; N_STATE] = std::array::from_fn(|_| eval.next_trace_mask());
 
     // Require state lookup.
@@ -266,7 +281,7 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
 
     eval.add_to_relation(RelationEntry::new(
         lookup_elements,
-        E::EF::one(),
+        is_sel_1_nonzero.into(),
         &[
             -sel_1,
             initial_state[0].clone(),
@@ -282,7 +297,7 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
 
     eval.add_to_relation(RelationEntry::new(
         lookup_elements,
-        E::EF::one(),
+        is_sel_2_nonzero.into(),
         &[
             -sel_2,
             initial_state[8].clone(),
@@ -298,7 +313,7 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
 
     eval.add_to_relation(RelationEntry::new(
         lookup_elements,
-        E::EF::one(),
+        is_sel_3_nonzero.into(),
         &[
             -sel_3,
             state[0].clone(),
@@ -314,7 +329,7 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
 
     eval.add_to_relation(RelationEntry::new(
         lookup_elements,
-        E::EF::one(),
+        is_sel_4_nonzero.into(),
         &[
             -sel_4,
             state[8].clone(),
@@ -401,6 +416,28 @@ pub fn gen_trace(
         trace[col_index].data[vec_index] = PackedM31::from_array(std::array::from_fn(|i| {
             BaseField::from_u32_unchecked(control_flow.sel_4[vec_index * N_LANES + i] as u32)
         }));
+        col_index += 1;
+
+        // Fill sel_1_inv, sel_2_inv, sel_3_inv, sel_4_inv
+        trace[col_index].data[vec_index] =
+            pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
+                BaseField::from_u32_unchecked(control_flow.sel_1[vec_index * N_LANES + i] as u32)
+            })));
+        col_index += 1;
+        trace[col_index].data[vec_index] =
+            pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
+                BaseField::from_u32_unchecked(control_flow.sel_2[vec_index * N_LANES + i] as u32)
+            })));
+        col_index += 1;
+        trace[col_index].data[vec_index] =
+            pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
+                BaseField::from_u32_unchecked(control_flow.sel_3[vec_index * N_LANES + i] as u32)
+            })));
+        col_index += 1;
+        trace[col_index].data[vec_index] =
+            pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
+                BaseField::from_u32_unchecked(control_flow.sel_4[vec_index * N_LANES + i] as u32)
+            })));
         col_index += 1;
 
         // Initial state.
@@ -542,7 +579,7 @@ pub fn check_trace(trace: &ColumnVec<CircleEvaluation<SimdBackend, BaseField, Bi
     }
 
     for vec_index in 0..1 << (log_size - LOG_N_LANES) {
-        let mut col_index = 4;
+        let mut col_index = 8;
         let mut state: [_; N_STATE] = std::array::from_fn(|i| trace[col_index + i].data[vec_index]);
         col_index += N_STATE;
 
@@ -714,9 +751,17 @@ pub fn gen_interaction_trace(
         let sel_1 = PackedM31::from_array(std::array::from_fn(|i| {
             BaseField::from_u32_unchecked(control_flow.sel_1[vec_row * N_LANES + i] as u32)
         }));
+        let sel_1_inv = pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_1[vec_row * N_LANES + i] as u32)
+        })));
+        let is_sel_1_nonzero = sel_1 * sel_1_inv;
         let sel_2 = PackedM31::from_array(std::array::from_fn(|i| {
             BaseField::from_u32_unchecked(control_flow.sel_2[vec_row * N_LANES + i] as u32)
         }));
+        let sel_2_inv = pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_2[vec_row * N_LANES + i] as u32)
+        })));
+        let is_sel_2_nonzero = sel_2 * sel_2_inv;
         let src_1: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
             let r = data_flow
                 .0
@@ -744,7 +789,11 @@ pub fn gen_interaction_trace(
         }
         let denom1: PackedSecureField = lookup_elements.combine(&denom1_arr);
         // (1 / denom1) + (1 / denom1) = (denom1 + denom0) / (denom0 * denom1).
-        col_gen.write_frac(vec_row, denom1 + denom0, denom0 * denom1);
+        col_gen.write_frac(
+            vec_row,
+            denom1 * is_sel_1_nonzero + denom0 * is_sel_2_nonzero,
+            denom0 * denom1,
+        );
     }
     col_gen.finalize_col();
 
@@ -753,9 +802,17 @@ pub fn gen_interaction_trace(
         let sel_3 = PackedM31::from_array(std::array::from_fn(|i| {
             BaseField::from_u32_unchecked(control_flow.sel_3[vec_row * N_LANES + i] as u32)
         }));
+        let sel_3_inv = pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_3[vec_row * N_LANES + i] as u32)
+        })));
+        let is_sel_3_nonzero = sel_3 * sel_3_inv;
         let sel_4 = PackedM31::from_array(std::array::from_fn(|i| {
             BaseField::from_u32_unchecked(control_flow.sel_4[vec_row * N_LANES + i] as u32)
         }));
+        let sel_4_inv = pow2147483645(PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(control_flow.sel_4[vec_row * N_LANES + i] as u32)
+        })));
+        let is_sel_4_nonzero = sel_4 * sel_4_inv;
         let src_3: [[M31; 8]; N_LANES] = std::array::from_fn(|i| {
             let r = data_flow
                 .0
@@ -783,7 +840,11 @@ pub fn gen_interaction_trace(
         }
         let denom1: PackedSecureField = lookup_elements.combine(&denom1_arr);
         // (1 / denom1) + (1 / denom1) = (denom1 + denom0) / (denom0 * denom1).
-        col_gen.write_frac(vec_row, denom1 + denom0, denom0 * denom1);
+        col_gen.write_frac(
+            vec_row,
+            denom1 * is_sel_3_nonzero + denom0 * is_sel_4_nonzero,
+            denom0 * denom1,
+        );
     }
     col_gen.finalize_col();
 
@@ -830,12 +891,16 @@ pub fn check_interaction_trace(
     let mut input_sum = QM31::zero();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let sel_1 = trace[0].data[vec_row];
+        let sel_1_inv = pow2147483645(sel_1);
+        let is_sel_1_zero = sel_1 * sel_1_inv;
         let sel_2 = trace[1].data[vec_row];
+        let sel_2_inv = pow2147483645(sel_2);
+        let is_sel_2_zero = sel_2 * sel_2_inv;
 
         let input_state_1: [PackedBaseField; 8] =
-            std::array::from_fn(|i| trace[4 + i].data[vec_row]);
+            std::array::from_fn(|i| trace[8 + i].data[vec_row]);
         let input_state_2: [PackedBaseField; 8] =
-            std::array::from_fn(|i| trace[12 + i].data[vec_row]);
+            std::array::from_fn(|i| trace[16 + i].data[vec_row]);
 
         let v1: PackedSecureField = lookup_elements.combine(&[
             -sel_1,
@@ -848,7 +913,7 @@ pub fn check_interaction_trace(
             input_state_1[6],
             input_state_1[7],
         ]);
-        input_sum += v1.inverse().pointwise_sum();
+        input_sum += (v1.inverse() * is_sel_1_zero).pointwise_sum();
 
         let v2: PackedSecureField = lookup_elements.combine(&[
             -sel_2,
@@ -861,18 +926,22 @@ pub fn check_interaction_trace(
             input_state_2[6],
             input_state_2[7],
         ]);
-        input_sum += v2.inverse().pointwise_sum();
+        input_sum += (v2.inverse() * is_sel_2_zero).pointwise_sum();
     }
 
     let mut output_sum = QM31::zero();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let sel_3 = trace[2].data[vec_row];
+        let sel_3_inv = pow2147483645(sel_3);
+        let is_sel_3_zero = sel_3 * sel_3_inv;
         let sel_4 = trace[3].data[vec_row];
+        let sel_4_inv = pow2147483645(sel_4);
+        let is_sel_4_zero = sel_4 * sel_4_inv;
 
         let output_state_1: [PackedBaseField; 8] =
-            std::array::from_fn(|i| trace[146 + i].data[vec_row]);
+            std::array::from_fn(|i| trace[150 + i].data[vec_row]);
         let output_state_2: [PackedBaseField; 8] =
-            std::array::from_fn(|i| trace[154 + i].data[vec_row]);
+            std::array::from_fn(|i| trace[158 + i].data[vec_row]);
 
         let v1: PackedSecureField = lookup_elements.combine(&[
             -sel_3,
@@ -885,7 +954,7 @@ pub fn check_interaction_trace(
             output_state_1[6],
             output_state_1[7],
         ]);
-        output_sum += v1.inverse().pointwise_sum();
+        output_sum += (v1.inverse() * is_sel_3_zero).pointwise_sum();
 
         let v2: PackedSecureField = lookup_elements.combine(&[
             -sel_4,
@@ -898,7 +967,7 @@ pub fn check_interaction_trace(
             output_state_2[6],
             output_state_2[7],
         ]);
-        output_sum += v2.inverse().pointwise_sum();
+        output_sum += (v2.inverse() * is_sel_4_zero).pointwise_sum();
     }
 
     assert_eq!(total_sum, addr_sel_sum + input_sum + output_sum);

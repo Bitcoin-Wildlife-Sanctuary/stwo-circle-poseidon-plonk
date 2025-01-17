@@ -1,4 +1,4 @@
-use std::simd::Mask;
+use std::ops::Neg;
 
 use itertools::Itertools;
 use num_traits::One;
@@ -8,15 +8,15 @@ use crate::constraint_framework::logup::LogupTraceGenerator;
 use crate::constraint_framework::preprocessed_columns::{gen_is_first, PreprocessedColumn};
 use crate::constraint_framework::{
     assert_constraints, EvalAtRow, FrameworkComponent, FrameworkEval, Relation, RelationEntry,
-    TraceLocationAllocator, ORIGINAL_TRACE_IDX,
+    TraceLocationAllocator,
 };
 use crate::core::backend::simd::column::BaseColumn;
-use crate::core::backend::simd::m31::{PackedM31, LOG_N_LANES};
+use crate::core::backend::simd::m31::LOG_N_LANES;
 use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::{BackendForChannel, Column};
 use crate::core::channel::MerkleChannel;
-use crate::core::fields::m31::BaseField;
+use crate::core::fields::m31::{BaseField, M31};
 use crate::core::fields::qm31::SecureField;
 use crate::core::pcs::{CommitmentSchemeProver, PcsConfig};
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
@@ -52,34 +52,79 @@ impl FrameworkEval for PlonkWithAcceleratorEval {
         //   A constant column is easier though.
         let c_wire = eval.get_preprocessed_column(PreprocessedColumn::Plonk(2));
         let op = eval.get_preprocessed_column(PreprocessedColumn::Plonk(3));
-        let mult = eval.get_preprocessed_column(PreprocessedColumn::Plonk(4));
-        let mult_poseidon = eval.get_preprocessed_column(PreprocessedColumn::Plonk(5));
+        let mult_a = eval.get_preprocessed_column(PreprocessedColumn::Plonk(4));
+        let mult_b = eval.get_preprocessed_column(PreprocessedColumn::Plonk(5));
+        let mult_c = eval.get_preprocessed_column(PreprocessedColumn::Plonk(6));
+        let mult_poseidon = eval.get_preprocessed_column(PreprocessedColumn::Plonk(7));
+        let enforce_c_m31 = eval.get_preprocessed_column(PreprocessedColumn::Plonk(8));
 
-        let a_val = eval.next_trace_mask();
-        let b_val = eval.next_trace_mask();
-        let c_vals = eval.next_interaction_mask(ORIGINAL_TRACE_IDX, [0, 1, 2, 3, 4, 5, 6, 7]);
+        let a_val_0 = eval.next_trace_mask();
+        let a_val_1 = eval.next_trace_mask();
+        let a_val_2 = eval.next_trace_mask();
+        let a_val_3 = eval.next_trace_mask();
+
+        let b_val_0 = eval.next_trace_mask();
+        let b_val_1 = eval.next_trace_mask();
+        let b_val_2 = eval.next_trace_mask();
+        let b_val_3 = eval.next_trace_mask();
+
+        let c_val_0 = eval.next_trace_mask();
+        let c_val_1 = eval.next_trace_mask();
+        let c_val_2 = eval.next_trace_mask();
+        let c_val_3 = eval.next_trace_mask();
+
+        eval.add_constraint(enforce_c_m31.clone() * c_val_1.clone());
+        eval.add_constraint(enforce_c_m31.clone() * c_val_2.clone());
+        eval.add_constraint(enforce_c_m31.clone() * c_val_3.clone());
+
+        let a_val = E::EF::from(a_val_0.clone())
+            + a_val_1.clone() * SecureField::from_u32_unchecked(0, 1, 0, 0)
+            + a_val_2.clone() * SecureField::from_u32_unchecked(0, 0, 1, 0)
+            + a_val_3.clone() * SecureField::from_u32_unchecked(0, 0, 0, 1);
+
+        let b_val = E::EF::from(b_val_0.clone())
+            + b_val_1.clone() * SecureField::from_u32_unchecked(0, 1, 0, 0)
+            + b_val_2.clone() * SecureField::from_u32_unchecked(0, 0, 1, 0)
+            + b_val_3.clone() * SecureField::from_u32_unchecked(0, 0, 0, 1);
+
+        let c_val = E::EF::from(c_val_0.clone())
+            + c_val_1.clone() * SecureField::from_u32_unchecked(0, 1, 0, 0)
+            + c_val_2.clone() * SecureField::from_u32_unchecked(0, 0, 1, 0)
+            + c_val_3.clone() * SecureField::from_u32_unchecked(0, 0, 0, 1);
 
         eval.add_constraint(
-            c_vals[0].clone()
-                - op.clone() * (a_val.clone() + b_val.clone())
-                - (E::F::one() - op) * a_val.clone() * b_val.clone(),
+            c_val.clone()
+                - E::EF::from(op.clone()) * (a_val.clone() + b_val.clone())
+                - E::EF::from(E::F::one() - op) * a_val.clone() * b_val.clone(),
         );
 
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
-            E::EF::one(),
-            &[a_wire, a_val],
+            mult_a.into(),
+            &[
+                a_wire.clone(),
+                a_val_0.clone(),
+                a_val_1.clone(),
+                a_val_2.clone(),
+                a_val_3.clone(),
+            ],
         ));
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
-            E::EF::one(),
-            &[b_wire, b_val],
+            mult_b.into(),
+            &[
+                b_wire,
+                b_val_0.clone(),
+                b_val_1.clone(),
+                b_val_2.clone(),
+                b_val_3.clone(),
+            ],
         ));
 
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
-            (-mult).into(),
-            &[c_wire.clone(), c_vals[0].clone()],
+            mult_c.into(),
+            &[c_wire.clone(), c_val_0, c_val_1, c_val_2, c_val_3],
         ));
 
         eval.add_to_relation(RelationEntry::new(
@@ -87,14 +132,14 @@ impl FrameworkEval for PlonkWithAcceleratorEval {
             (-mult_poseidon).into(),
             &[
                 -c_wire.clone(),
-                c_vals[0].clone(),
-                c_vals[1].clone(),
-                c_vals[2].clone(),
-                c_vals[3].clone(),
-                c_vals[4].clone(),
-                c_vals[5].clone(),
-                c_vals[6].clone(),
-                c_vals[7].clone(),
+                a_val_0.clone(),
+                a_val_1.clone(),
+                a_val_2.clone(),
+                a_val_3.clone(),
+                b_val_0.clone(),
+                b_val_1.clone(),
+                b_val_2.clone(),
+                b_val_3.clone(),
             ],
         ));
 
@@ -105,27 +150,50 @@ impl FrameworkEval for PlonkWithAcceleratorEval {
 
 #[derive(Clone)]
 pub struct PlonkWithAcceleratorCircuitTrace {
-    pub mult: BaseColumn,
+    pub mult_a: BaseColumn,
+    pub mult_b: BaseColumn,
+    pub mult_c: BaseColumn,
     pub mult_poseidon: BaseColumn,
+    pub enforce_c_m31: BaseColumn,
     pub a_wire: BaseColumn,
     pub b_wire: BaseColumn,
     pub c_wire: BaseColumn,
     pub op: BaseColumn,
-    pub a_val: BaseColumn,
-    pub b_val: BaseColumn,
-    pub c_val: BaseColumn,
+    pub a_val_0: BaseColumn,
+    pub a_val_1: BaseColumn,
+    pub a_val_2: BaseColumn,
+    pub a_val_3: BaseColumn,
+    pub b_val_0: BaseColumn,
+    pub b_val_1: BaseColumn,
+    pub b_val_2: BaseColumn,
+    pub b_val_3: BaseColumn,
+    pub c_val_0: BaseColumn,
+    pub c_val_1: BaseColumn,
+    pub c_val_2: BaseColumn,
+    pub c_val_3: BaseColumn,
 }
 pub fn gen_trace(
     log_size: u32,
     circuit: &PlonkWithAcceleratorCircuitTrace,
 ) -> ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>> {
     let _span = span!(Level::INFO, "Generation").entered();
-
-    let coset = CanonicCoset::new(log_size);
-    [&circuit.a_val, &circuit.b_val, &circuit.c_val]
-        .into_iter()
-        .map(|eval| CircleEvaluation::new_canonical_ordered(coset, eval.clone()))
-        .collect()
+    [
+        &circuit.a_val_0,
+        &circuit.a_val_1,
+        &circuit.a_val_2,
+        &circuit.a_val_3,
+        &circuit.b_val_0,
+        &circuit.b_val_1,
+        &circuit.b_val_2,
+        &circuit.b_val_3,
+        &circuit.c_val_0,
+        &circuit.c_val_1,
+        &circuit.c_val_2,
+        &circuit.c_val_3,
+    ]
+    .into_iter()
+    .map(|eval| CircleEvaluation::new(CanonicCoset::new(log_size).circle_domain(), eval.clone()))
+    .collect()
 }
 
 pub fn gen_interaction_trace(
@@ -141,48 +209,54 @@ pub fn gen_interaction_trace(
 
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
-        let q0: PackedSecureField =
-            lookup_elements.combine(&[circuit.a_wire.data[vec_row], circuit.a_val.data[vec_row]]);
-        let q1: PackedSecureField =
-            lookup_elements.combine(&[circuit.b_wire.data[vec_row], circuit.b_val.data[vec_row]]);
-        col_gen.write_frac(vec_row, q0 + q1, q0 * q1);
+        let p0 = circuit.mult_a.data[vec_row];
+        let q0: PackedSecureField = lookup_elements.combine(&[
+            circuit.a_wire.data[vec_row],
+            circuit.a_val_0.data[vec_row],
+            circuit.a_val_1.data[vec_row],
+            circuit.a_val_2.data[vec_row],
+            circuit.a_val_3.data[vec_row],
+        ]);
+        let p1 = circuit.mult_b.data[vec_row];
+        let q1: PackedSecureField = lookup_elements.combine(&[
+            circuit.b_wire.data[vec_row],
+            circuit.b_val_0.data[vec_row],
+            circuit.b_val_1.data[vec_row],
+            circuit.b_val_2.data[vec_row],
+            circuit.b_val_3.data[vec_row],
+        ]);
+        col_gen.write_frac(vec_row, q0 * p1 + q1 * p0, q0 * q1);
     }
     col_gen.finalize_col();
 
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
-        let p0 = -circuit.mult.data[vec_row];
-        let q0: PackedSecureField =
-            lookup_elements.combine(&[circuit.c_wire.data[vec_row], circuit.c_val.data[vec_row]]);
+        let p0 = circuit.mult_c.data[vec_row];
+        let q0: PackedSecureField = lookup_elements.combine(&[
+            circuit.c_wire.data[vec_row],
+            circuit.c_val_0.data[vec_row],
+            circuit.c_val_1.data[vec_row],
+            circuit.c_val_2.data[vec_row],
+            circuit.c_val_3.data[vec_row],
+        ]);
 
         let p1 = -circuit.mult_poseidon.data[vec_row];
-
-        let mut c_val_and_shifted_ones = Vec::with_capacity(9);
-        c_val_and_shifted_ones.push(-circuit.c_wire.data[vec_row]);
-        c_val_and_shifted_ones.push(circuit.c_val.data[vec_row]);
-
-        let mut first = circuit.c_val.data[vec_row].into_simd();
-        let mut second =
-            circuit.c_val.data[(vec_row + 1) % (1 << (log_size - LOG_N_LANES))].into_simd();
-
-        for i in 1..8 {
-            let mask = Mask::<_, 16>::from_bitmask((1 << (16 - i)) - 1);
-            first = first.rotate_elements_left::<1>();
-            second = second.rotate_elements_left::<1>();
-            unsafe {
-                c_val_and_shifted_ones.push(PackedM31::from_simd_unchecked(
-                    mask.clone().select(first, second),
-                ));
-            }
-        }
-        let q1: PackedSecureField = lookup_elements.combine(&c_val_and_shifted_ones);
-
-        col_gen.write_frac(vec_row, p0.into(), q0);
+        let q1: PackedSecureField = lookup_elements.combine(&[
+            -circuit.c_wire.data[vec_row],
+            circuit.a_val_0.data[vec_row],
+            circuit.a_val_1.data[vec_row],
+            circuit.a_val_2.data[vec_row],
+            circuit.a_val_3.data[vec_row],
+            circuit.b_val_0.data[vec_row],
+            circuit.b_val_1.data[vec_row],
+            circuit.b_val_2.data[vec_row],
+            circuit.b_val_3.data[vec_row],
+        ]);
         col_gen.write_frac(vec_row, q0 * p1 + q1 * p0, q0 * q1);
     }
     col_gen.finalize_col();
 
-    logup_gen.finalize_last_canonical()
+    logup_gen.finalize_last()
 }
 
 pub fn prove_plonk_with_accelerator<MC: MerkleChannel>(
@@ -217,13 +291,16 @@ where
         circuit.b_wire.clone(),
         circuit.c_wire.clone(),
         circuit.op.clone(),
-        circuit.mult.clone(),
+        circuit.mult_a.clone(),
+        circuit.mult_b.clone(),
+        circuit.mult_c.clone(),
         circuit.mult_poseidon.clone(),
+        circuit.enforce_c_m31.clone(),
     ]
     .into_iter()
     .map(|col| {
-        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new_canonical_ordered(
-            CanonicCoset::new(log_n_rows),
+        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
+            CanonicCoset::new(log_n_rows).circle_domain(),
             col,
         )
     })
@@ -298,19 +375,31 @@ pub fn prove_fibonacci_plonk_with_accelerator(
     }
     let range = 0..(1 << log_n_rows);
     let mut circuit = PlonkWithAcceleratorCircuitTrace {
-        mult: range.clone().map(|_| 2.into()).collect(),
+        mult_a: range.clone().map(|_| 1.into()).collect(),
+        mult_b: range.clone().map(|_| 1.into()).collect(),
+        mult_c: range.clone().map(|_| M31::from(2).neg()).collect(),
         mult_poseidon: range.clone().map(|_| 0.into()).collect(),
         a_wire: range.clone().map(|i| i.into()).collect(),
         b_wire: range.clone().map(|i| (i + 1).into()).collect(),
         c_wire: range.clone().map(|i| (i + 2).into()).collect(),
         op: range.clone().map(|_| 1.into()).collect(),
-        a_val: range.clone().map(|i| fib_values[i]).collect(),
-        b_val: range.clone().map(|i| fib_values[i + 1]).collect(),
-        c_val: range.clone().map(|i| fib_values[i + 2]).collect(),
+        a_val_0: range.clone().map(|i| fib_values[i]).collect(),
+        a_val_1: range.clone().map(|_| 0.into()).collect(),
+        a_val_2: range.clone().map(|_| 0.into()).collect(),
+        a_val_3: range.clone().map(|_| 0.into()).collect(),
+        b_val_0: range.clone().map(|i| fib_values[i + 1]).collect(),
+        b_val_1: range.clone().map(|_| 0.into()).collect(),
+        b_val_2: range.clone().map(|_| 0.into()).collect(),
+        b_val_3: range.clone().map(|_| 0.into()).collect(),
+        c_val_0: range.clone().map(|i| fib_values[i + 2]).collect(),
+        c_val_1: range.clone().map(|_| 0.into()).collect(),
+        c_val_2: range.clone().map(|_| 0.into()).collect(),
+        c_val_3: range.clone().map(|_| 0.into()).collect(),
+        enforce_c_m31: range.clone().map(|_| 0.into()).collect(),
     };
     circuit.mult_poseidon.set(1, 1.into());
-    circuit.mult.set((1 << log_n_rows) - 1, 0.into());
-    circuit.mult.set((1 << log_n_rows) - 2, 1.into());
+    circuit.mult_c.set((1 << log_n_rows) - 1, 0.into());
+    circuit.mult_c.set((1 << log_n_rows) - 2, 1.into());
 
     prove_plonk_with_accelerator::<Blake2sMerkleChannel>(log_n_rows, config, &circuit)
 }

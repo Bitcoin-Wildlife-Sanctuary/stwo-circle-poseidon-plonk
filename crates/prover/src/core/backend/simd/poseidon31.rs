@@ -1,4 +1,5 @@
 use std::array;
+use std::cmp::min;
 
 use itertools::Itertools;
 use num_traits::Zero;
@@ -83,7 +84,7 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                     res
                 } else {
                     let mut res = [PackedM31::zero(); 16];
-                    for j in 0..16 {
+                    for j in 0..min(len, 16) {
                         res[j] = columns[j].data[i];
                     }
                     compress16(res)
@@ -101,7 +102,7 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                 }
 
                 let remain = len % 8;
-                if remain != 0 {
+                if len > 16 && remain != 0 {
                     let mut state = [PackedM31::zero(); 16];
                     for j in 0..8 {
                         state[j] = digest[j];

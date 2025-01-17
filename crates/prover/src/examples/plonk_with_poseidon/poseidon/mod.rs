@@ -346,13 +346,14 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
     eval.finalize_logup_in_pairs();
 }
 
+#[derive(Clone, Debug)]
 pub struct PoseidonEntry {
     pub addr: usize,
     pub sel: usize,
     pub hash: [M31; 8],
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Debug)]
 pub struct PoseidonFlow(pub Vec<(PoseidonEntry, PoseidonEntry, PoseidonEntry, PoseidonEntry)>);
 
 pub fn gen_trace(

@@ -1006,7 +1006,7 @@ fn compute_decommitment_positions_and_witness_evals(
 /// # Panics
 ///
 /// Panics if the number of queries doesn't match the number of query evals.
-fn compute_decommitment_positions_and_rebuild_evals(
+pub fn compute_decommitment_positions_and_rebuild_evals(
     queries: &Queries,
     query_evals: &[QM31],
     mut witness_evals: impl Iterator<Item = QM31>,
@@ -1043,15 +1043,15 @@ fn compute_decommitment_positions_and_rebuild_evals(
 }
 
 #[derive(Debug)]
-struct InsufficientWitnessError;
+pub struct InsufficientWitnessError;
 
 /// Foldable subsets of evaluations on a [`CirclePoly`] or [`LinePoly`].
 ///
 /// [`CirclePoly`]: crate::core::poly::circle::CirclePoly
-struct SparseEvaluation {
+pub struct SparseEvaluation {
     // TODO(andrew): Perhaps subset isn't the right word. Coset, Subgroup?
-    subset_evals: Vec<Vec<SecureField>>,
-    subset_domain_initial_indexes: Vec<usize>,
+    pub subset_evals: Vec<Vec<SecureField>>,
+    pub subset_domain_initial_indexes: Vec<usize>,
 }
 
 impl SparseEvaluation {
@@ -1059,7 +1059,7 @@ impl SparseEvaluation {
     ///
     /// Panics if a subset size doesn't equal `2^FOLD_STEP` or there aren't the same number of
     /// domain indexes as subsets.
-    fn new(subset_evals: Vec<Vec<SecureField>>, subset_domain_initial_indexes: Vec<usize>) -> Self {
+    pub fn new(subset_evals: Vec<Vec<SecureField>>, subset_domain_initial_indexes: Vec<usize>) -> Self {
         let fold_factor = 1 << FOLD_STEP;
         assert!(subset_evals.iter().all(|e| e.len() == fold_factor));
         assert_eq!(subset_evals.len(), subset_domain_initial_indexes.len());
@@ -1069,7 +1069,7 @@ impl SparseEvaluation {
         }
     }
 
-    fn fold_line(self, fold_alpha: SecureField, source_domain: LineDomain) -> Vec<SecureField> {
+    pub fn fold_line(self, fold_alpha: SecureField, source_domain: LineDomain) -> Vec<SecureField> {
         zip(self.subset_evals, self.subset_domain_initial_indexes)
             .map(|(eval, domain_initial_index)| {
                 let fold_domain_initial = source_domain.coset().index_at(domain_initial_index);
@@ -1080,7 +1080,7 @@ impl SparseEvaluation {
             .collect()
     }
 
-    fn fold_circle(self, fold_alpha: SecureField, source_domain: CircleDomain) -> Vec<SecureField> {
+    pub fn fold_circle(self, fold_alpha: SecureField, source_domain: CircleDomain) -> Vec<SecureField> {
         zip(self.subset_evals, self.subset_domain_initial_indexes)
             .map(|(eval, domain_initial_index)| {
                 let fold_domain_initial = source_domain.index_at(domain_initial_index);

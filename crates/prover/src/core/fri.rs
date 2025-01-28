@@ -1059,7 +1059,10 @@ impl SparseEvaluation {
     ///
     /// Panics if a subset size doesn't equal `2^FOLD_STEP` or there aren't the same number of
     /// domain indexes as subsets.
-    pub fn new(subset_evals: Vec<Vec<SecureField>>, subset_domain_initial_indexes: Vec<usize>) -> Self {
+    pub fn new(
+        subset_evals: Vec<Vec<SecureField>>,
+        subset_domain_initial_indexes: Vec<usize>,
+    ) -> Self {
         let fold_factor = 1 << FOLD_STEP;
         assert!(subset_evals.iter().all(|e| e.len() == fold_factor));
         assert_eq!(subset_evals.len(), subset_domain_initial_indexes.len());
@@ -1080,7 +1083,11 @@ impl SparseEvaluation {
             .collect()
     }
 
-    pub fn fold_circle(self, fold_alpha: SecureField, source_domain: CircleDomain) -> Vec<SecureField> {
+    pub fn fold_circle(
+        self,
+        fold_alpha: SecureField,
+        source_domain: CircleDomain,
+    ) -> Vec<SecureField> {
         zip(self.subset_evals, self.subset_domain_initial_indexes)
             .map(|(eval, domain_initial_index)| {
                 let fold_domain_initial = source_domain.index_at(domain_initial_index);

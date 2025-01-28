@@ -13,6 +13,46 @@ const ELEMENTS_IN_BLOCK: usize = 8;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Deserialize, Serialize)]
 pub struct Poseidon31MerkleHasher;
+
+impl Poseidon31MerkleHasher {
+    pub fn hash_column(column_values: &[BaseField]) -> Poseidon31Hash {
+        assert!(!column_values.is_empty());
+
+        let zero = M31::zero();
+        let len = column_values.len();
+        let num_chunk = len.div_ceil(8);
+
+        let mut digest = if num_chunk == 1 {
+            let mut res = [zero; 8];
+            res[..len].copy_from_slice(column_values);
+            res
+        } else {
+            let mut res = [zero; 16];
+            for i in 0..min(16, len) {
+                res[i] = column_values[i];
+            }
+            Poseidon31CRH::compress(&res)
+        };
+
+        for chunk in column_values.chunks_exact(ELEMENTS_IN_BLOCK).skip(2) {
+            let mut state = [zero; 16];
+            state[..8].copy_from_slice(&digest);
+            state[8..16].copy_from_slice(chunk);
+            digest = Poseidon31CRH::compress(&state);
+        }
+
+        let remain = len % ELEMENTS_IN_BLOCK;
+        if len > 16 && remain != 0 {
+            let mut state = [zero; 16];
+            state[..8].copy_from_slice(&digest);
+            state[8..8 + remain].copy_from_slice(&column_values[len - remain..]);
+            digest = Poseidon31CRH::compress(&state);
+        }
+
+        Poseidon31Hash(digest)
+    }
+}
+
 impl MerkleHasher for Poseidon31MerkleHasher {
     type Hash = Poseidon31Hash;
 
@@ -35,37 +75,7 @@ impl MerkleHasher for Poseidon31MerkleHasher {
         };
 
         let hash_column = if !column_values.is_empty() {
-            let len = column_values.len();
-            let num_chunk = len.div_ceil(8);
-
-            let mut digest = if num_chunk == 1 {
-                let mut res = [zero; 8];
-                res[..len].copy_from_slice(column_values);
-                res
-            } else {
-                let mut res = [zero; 16];
-                for i in 0..min(16, len) {
-                    res[i] = column_values[i];
-                }
-                Poseidon31CRH::compress(&res)
-            };
-
-            for chunk in column_values.chunks_exact(ELEMENTS_IN_BLOCK).skip(2) {
-                let mut state = [zero; 16];
-                state[..8].copy_from_slice(&digest);
-                state[8..16].copy_from_slice(chunk);
-                digest = Poseidon31CRH::compress(&state);
-            }
-
-            let remain = len % ELEMENTS_IN_BLOCK;
-            if len > 16 && remain != 0 {
-                let mut state = [zero; 16];
-                state[..8].copy_from_slice(&digest);
-                state[8..8 + remain].copy_from_slice(&column_values[len - remain..]);
-                digest = Poseidon31CRH::compress(&state);
-            }
-
-            Some(Poseidon31Hash(digest))
+            Some(Self::hash_column(column_values))
         } else {
             None
         };

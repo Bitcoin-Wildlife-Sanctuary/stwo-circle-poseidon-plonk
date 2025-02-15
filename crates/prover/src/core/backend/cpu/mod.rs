@@ -9,6 +9,8 @@ mod poseidon252;
 
 mod poseidon31;
 
+mod btc_sha256;
+
 pub mod quotients;
 
 use std::fmt::Debug;
@@ -21,6 +23,7 @@ use crate::core::lookups::mle::Mle;
 use crate::core::poly::circle::{CircleEvaluation, CirclePoly};
 use crate::core::utils::bit_reverse_index;
 use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+use crate::core::vcs::btc_sha256_merkle::BTCSha256MerkleChannel;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::core::vcs::poseidon252_merkle::Poseidon252MerkleChannel;
 use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
@@ -33,6 +36,7 @@ impl BackendForChannel<Blake2sMerkleChannel> for CpuBackend {}
 #[cfg(not(target_arch = "wasm32"))]
 impl BackendForChannel<Poseidon252MerkleChannel> for CpuBackend {}
 impl BackendForChannel<Poseidon31MerkleChannel> for CpuBackend {}
+impl BackendForChannel<BTCSha256MerkleChannel> for CpuBackend {}
 
 /// Performs a naive bit-reversal permutation inplace.
 ///

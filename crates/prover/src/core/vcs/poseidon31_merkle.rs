@@ -129,3 +129,98 @@ impl MerkleChannel for Poseidon31MerkleChannel {
         channel.update_digest(*new_digest);
     }
 }
+
+
+
+#[cfg(test)]
+mod tests {
+    use num_traits::Zero;
+
+    use crate::core::channel::{MerkleChannel, Poseidon31Channel};
+    use crate::core::fields::m31::BaseField;
+    use crate::core::vcs::poseidon31_hash::Poseidon31Hash;
+    use crate::core::vcs::poseidon31_merkle::{Poseidon31MerkleChannel, Poseidon31MerkleHasher};
+    use crate::core::vcs::test_utils::prepare_merkle;
+    use crate::core::vcs::verifier::MerkleVerificationError;
+
+    #[test]
+    fn test_merkle_success() {
+        let (queries, decommitment, values, verifier) = prepare_merkle::<Poseidon31MerkleHasher>();
+
+        verifier.verify(&queries, values, decommitment).unwrap();
+    }
+
+    #[test]
+    fn test_merkle_invalid_witness() {
+        let (queries, mut decommitment, values, verifier) = prepare_merkle::<Poseidon31MerkleHasher>();
+        decommitment.hash_witness[4] = Poseidon31Hash::default();
+
+        assert_eq!(
+            verifier.verify(&queries, values, decommitment).unwrap_err(),
+            MerkleVerificationError::RootMismatch
+        );
+    }
+
+    #[test]
+    fn test_merkle_invalid_value() {
+        let (queries, decommitment, mut values, verifier) = prepare_merkle::<Poseidon31MerkleHasher>();
+        values[6] = BaseField::zero();
+
+        assert_eq!(
+            verifier.verify(&queries, values, decommitment).unwrap_err(),
+            MerkleVerificationError::RootMismatch
+        );
+    }
+
+    #[test]
+    fn test_merkle_witness_too_short() {
+        let (queries, mut decommitment, values, verifier) = prepare_merkle::<Poseidon31MerkleHasher>();
+        decommitment.hash_witness.pop();
+
+        assert_eq!(
+            verifier.verify(&queries, values, decommitment).unwrap_err(),
+            MerkleVerificationError::WitnessTooShort
+        );
+    }
+
+    #[test]
+    fn test_merkle_witness_too_long() {
+        let (queries, mut decommitment, values, verifier) = prepare_merkle::<Poseidon31MerkleHasher>();
+        decommitment.hash_witness.push(Poseidon31Hash::default());
+
+        assert_eq!(
+            verifier.verify(&queries, values, decommitment).unwrap_err(),
+            MerkleVerificationError::WitnessTooLong
+        );
+    }
+
+    #[test]
+    fn test_merkle_column_values_too_long() {
+        let (queries, decommitment, mut values, verifier) = prepare_merkle::<Poseidon31MerkleHasher>();
+        values.insert(3, BaseField::zero());
+
+        assert_eq!(
+            verifier.verify(&queries, values, decommitment).unwrap_err(),
+            MerkleVerificationError::TooManyQueriedValues
+        );
+    }
+
+    #[test]
+    fn test_merkle_column_values_too_short() {
+        let (queries, decommitment, mut values, verifier) = prepare_merkle::<Poseidon31MerkleHasher>();
+        values.remove(3);
+
+        assert_eq!(
+            verifier.verify(&queries, values, decommitment).unwrap_err(),
+            MerkleVerificationError::TooFewQueriedValues
+        );
+    }
+
+    #[test]
+    fn test_merkle_channel() {
+        let mut channel = Poseidon31Channel::default();
+        let (_queries, _decommitment, _values, verifier) = prepare_merkle::<Poseidon31MerkleHasher>();
+        Poseidon31MerkleChannel::mix_root(&mut channel, verifier.root);
+        assert_eq!(channel.channel_time.n_challenges, 1);
+    }
+}

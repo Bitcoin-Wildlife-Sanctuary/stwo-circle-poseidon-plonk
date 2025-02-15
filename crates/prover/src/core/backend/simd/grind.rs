@@ -11,7 +11,7 @@ use super::blake2s::compress16;
 use super::SimdBackend;
 use crate::core::backend::simd::m31::{PackedM31, N_LANES};
 use crate::core::backend::simd::poseidon31::permute;
-use crate::core::channel::{Blake2sChannel, Poseidon31Channel};
+use crate::core::channel::{BTCSha256Channel, Blake2sChannel, Poseidon31Channel};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::core::channel::{Channel, Poseidon252Channel};
 use crate::core::fields::m31::M31;
@@ -20,6 +20,36 @@ use crate::core::proof_of_work::GrindOps;
 // Note: GRIND_LOW_BITS is a cap on how much extra time we need to wait for all threads to finish.
 const GRIND_LOW_BITS: u32 = 20;
 const GRIND_HI_BITS: u32 = 64 - GRIND_LOW_BITS;
+
+impl GrindOps<BTCSha256Channel> for SimdBackend {
+    fn grind(channel: &BTCSha256Channel, pow_bits: u32) -> u64 {
+        #[cfg(not(feature = "parallel"))]
+        let res = (0..=(1 << GRIND_HI_BITS))
+            .find_map(|hi| grind_sha256(channel, hi, pow_bits))
+            .expect("Grind failed to find a solution.");
+
+        #[cfg(feature = "parallel")]
+        let res = (0..=(1 << GRIND_HI_BITS))
+            .into_par_iter()
+            .find_map_any(|hi| grind_sha256(channel, hi, pow_bits))
+            .expect("Grind failed to find a solution.");
+
+        res
+    }
+}
+
+fn grind_sha256(channel: &BTCSha256Channel, hi: u64, pow_bits: u32) -> Option<u64> {
+    let high_start = hi << GRIND_LOW_BITS;
+
+    for low in 0..(1 << GRIND_LOW_BITS) {
+        let mut this_channel = channel.clone();
+        this_channel.mix_u64(high_start + low);
+        if this_channel.trailing_zeros() >= pow_bits {
+            return Some(high_start + low);
+        }
+    }
+    None
+}
 
 impl GrindOps<Blake2sChannel> for SimdBackend {
     fn grind(channel: &Blake2sChannel, pow_bits: u32) -> u64 {

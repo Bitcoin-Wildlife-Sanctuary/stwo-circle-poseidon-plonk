@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-
 use super::{Backend, BackendForChannel};
 use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+use crate::core::vcs::btc_sha256_merkle::BTCSha256MerkleChannel;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::core::vcs::poseidon252_merkle::Poseidon252MerkleChannel;
 use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
@@ -22,6 +22,7 @@ pub mod m31;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod poseidon252;
 pub mod poseidon31;
+pub mod btc_sha256;
 pub mod prefix_sum;
 pub mod qm31;
 pub mod quotients;
@@ -36,3 +37,4 @@ impl BackendForChannel<Blake2sMerkleChannel> for SimdBackend {}
 #[cfg(not(target_arch = "wasm32"))]
 impl BackendForChannel<Poseidon252MerkleChannel> for SimdBackend {}
 impl BackendForChannel<Poseidon31MerkleChannel> for SimdBackend {}
+impl BackendForChannel<BTCSha256MerkleChannel> for SimdBackend {}

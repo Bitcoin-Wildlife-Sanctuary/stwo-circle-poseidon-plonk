@@ -12,6 +12,8 @@ pub mod poseidon31_hash;
 pub mod poseidon31_merkle;
 pub mod poseidon31_ref;
 pub mod prover;
+pub mod btc_sha256_hash;
+pub mod btc_sha256_merkle;
 mod utils;
 pub mod verifier;
 

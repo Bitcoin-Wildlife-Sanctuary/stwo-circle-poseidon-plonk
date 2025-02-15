@@ -351,6 +351,7 @@ mod test {
     use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
     use crate::core::prover::verify;
     use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+    use crate::core::vcs::btc_sha256_merkle::BTCSha256MerkleChannel;
     use crate::core::vcs::poseidon31_merkle::{Poseidon31MerkleChannel, Poseidon31MerkleHasher};
     use crate::examples::plonk_with_poseidon::air::{
         prove_plonk_with_poseidon, verify_plonk_with_poseidon, PlonkWithPoseidonProof,
@@ -809,6 +810,25 @@ mod test {
             &mut poseidon,
         );
         verify_plonk_with_poseidon::<Blake2sMerkleChannel>(proof, config, &[(1, QM31::one())])
+            .unwrap();
+    }
+
+    #[test]
+    fn test_joint_proof_btc_sha256() {
+        let (plonk, mut poseidon) = generate_test_circuit();
+        let config = PcsConfig {
+            pow_bits: 10,
+            fri_config: FriConfig::new(2, 4, 64),
+        };
+
+        let proof = prove_plonk_with_poseidon::<BTCSha256MerkleChannel>(
+            plonk.mult_c.length.ilog2(),
+            poseidon.0.len().ilog2(),
+            config,
+            &plonk,
+            &mut poseidon,
+        );
+        verify_plonk_with_poseidon::<BTCSha256MerkleChannel>(proof, config, &[(1, QM31::one())])
             .unwrap();
     }
 

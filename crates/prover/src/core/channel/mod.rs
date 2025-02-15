@@ -12,6 +12,9 @@ pub use poseidon31::Poseidon31Channel;
 mod blake2s;
 pub use blake2s::Blake2sChannel;
 
+mod btc_sha256;
+pub use btc_sha256::BTCSha256Channel;
+
 pub const EXTENSION_FELTS_PER_HASH: usize = 2;
 
 #[derive(Clone, Default)]

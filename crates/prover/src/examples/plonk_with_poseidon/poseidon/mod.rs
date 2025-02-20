@@ -57,7 +57,7 @@ const N_STATE: usize = 16;
 const N_HALF_FULL_ROUNDS: usize = 4;
 const N_PARTIAL_ROUNDS: usize = 14;
 const FULL_ROUNDS: usize = 2 * N_HALF_FULL_ROUNDS;
-const N_COLUMNS: usize = 4 + N_STATE * 2;
+const N_COLUMNS: usize = 5 + N_STATE * 2;
 const LOG_EXPAND: u32 = 3;
 
 pub const CONSTANT_1: [M31; 8] = [M31::from_u32_unchecked(0); 8];
@@ -192,8 +192,10 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
     //     external_idx_2 (default = 0)
     //     is_external_idx_1_nonzero
     //     is_external_idx_2_nonzero
+    //     swap_bit_addr
     //
     // trace columns:
+    //     swap_bit_val
     //     in_state (16 elements)
     //     out_state (16 elements)
     //     id_1 (temp)
@@ -249,15 +251,30 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
     let is_external_idx_2_nonzero =
         eval.get_preprocessed_column(Poseidon::new("is_external_idx_2_nonzero".to_string()).id());
 
+    let swap_bit_addr =
+        eval.get_preprocessed_column(Poseidon::new("swap_bit_addr".to_string()).id());
+
+    let swap_bit_value = eval.next_trace_mask();
+
     let in_state: [_; N_STATE] = std::array::from_fn(|_| eval.next_trace_mask());
     let out_state: [_; N_STATE] = std::array::from_fn(|_| eval.next_trace_mask());
 
     // if this is first round
-    let mut permuted_state = in_state.clone();
+    let one_minus_swap_bit_value = E::F::one() - swap_bit_value.clone();
+    let mut permuted_state: [E::EF; N_STATE] = std::array::from_fn(|i| {
+        if i < 8 {
+            E::EF::from(in_state[i].clone()) * one_minus_swap_bit_value.clone()
+                + E::EF::from(in_state[i + 8].clone()) * swap_bit_value.clone()
+        } else {
+            E::EF::from(in_state[i - 8].clone()) * swap_bit_value.clone()
+                + E::EF::from(in_state[i].clone()) * one_minus_swap_bit_value.clone()
+        }
+    });
     apply_external_round_matrix(&mut permuted_state);
     (0..N_STATE).for_each(|i| {
         eval.add_constraint(
-            is_first_round.clone() * (out_state[i].clone() - permuted_state[i].clone()),
+            (permuted_state[i].clone() - E::EF::from(out_state[i].clone()))
+                * is_first_round.clone(),
         );
     });
 
@@ -387,8 +404,14 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
         ],
     ));
 
+    eval.add_to_relation(RelationEntry::new(
+        lookup_elements,
+        E::EF::from(is_first_round) * is_not_last_round,
+        &[swap_bit_addr, swap_bit_value.clone()],
+    ));
+
     // TODO: use higher degrees batching
-    eval.finalize_logup_in_pairs();
+    eval.finalize_logup_batched(&vec![0, 0, 0, 0, 0]);
 }
 
 #[derive(Clone, Debug)]
@@ -397,8 +420,40 @@ pub struct PoseidonEntry {
     pub hash: [M31; 8],
 }
 
+#[derive(Clone, Debug)]
+pub struct SwapOption {
+    pub addr: usize,
+    pub swap: bool,
+}
+
+impl Default for SwapOption {
+    fn default() -> SwapOption {
+        SwapOption {
+            addr: 0,
+            swap: false,
+        }
+    }
+}
+
+impl SwapOption {
+    pub fn one() -> SwapOption {
+        SwapOption {
+            addr: 1,
+            swap: true,
+        }
+    }
+}
+
 #[derive(Default, Clone, Debug)]
-pub struct PoseidonFlow(pub Vec<(PoseidonEntry, PoseidonEntry, PoseidonEntry, PoseidonEntry)>);
+pub struct PoseidonFlow(
+    pub  Vec<(
+        PoseidonEntry,
+        PoseidonEntry,
+        PoseidonEntry,
+        PoseidonEntry,
+        SwapOption,
+    )>,
+);
 
 pub fn gen_trace(
     flow: &PoseidonFlow,
@@ -432,6 +487,16 @@ pub fn gen_trace(
             BaseField::from_u32_unchecked(flow.0[vec_index * N_LANES + i].1.wire as u32)
         }));
 
+        let swap_bit_val = PackedM31::from_array(std::array::from_fn(|i| {
+            if flow.0[vec_index * N_LANES + i].4.swap {
+                BaseField::one()
+            } else {
+                BaseField::zero()
+            }
+        }));
+        trace[col_index].data[round_index] = swap_bit_val;
+        col_index += 1;
+
         // Initial state.
         let input_left: [[M31; 8]; N_LANES] =
             std::array::from_fn(|i| flow.0[vec_index * N_LANES + i].0.hash);
@@ -449,6 +514,12 @@ pub fn gen_trace(
             trace[col_index].data[round_index] = s;
             col_index += 1;
         });
+        let one_minus_swap_bit_val = PackedM31::one() - swap_bit_val;
+        let mut cur = state.clone();
+        for i in 0..8 {
+            state[i] = cur[i] * one_minus_swap_bit_val + cur[i + 8] * swap_bit_val;
+            state[i + 8] = cur[i] * swap_bit_val + cur[i + 8] * one_minus_swap_bit_val;
+        }
         apply_external_round_matrix(&mut state);
         state.iter().copied().for_each(|s| {
             trace[col_index].data[round_index] = s;
@@ -474,6 +545,9 @@ pub fn gen_trace(
         for r in 0..N_HALF_FULL_ROUNDS {
             round_index += 1;
             col_index = 0;
+
+            trace[col_index].data[round_index] = PackedM31::zero();
+            col_index += 1;
 
             state.iter().copied().for_each(|s| {
                 trace[col_index].data[round_index] = s;
@@ -511,6 +585,9 @@ pub fn gen_trace(
             round_index += 1;
             col_index = 0;
 
+            trace[col_index].data[round_index] = PackedM31::zero();
+            col_index += 1;
+
             state.iter().copied().for_each(|s| {
                 trace[col_index].data[round_index] = s;
                 col_index += 1;
@@ -545,6 +622,9 @@ pub fn gen_trace(
         for r in 0..N_HALF_FULL_ROUNDS - 1 {
             round_index += 1;
             col_index = 0;
+
+            trace[col_index].data[round_index] = PackedM31::zero();
+            col_index += 1;
 
             state.iter().copied().for_each(|s| {
                 trace[col_index].data[round_index] = s;
@@ -581,6 +661,9 @@ pub fn gen_trace(
         // ****** Fill the last round ******
         round_index += 1;
         col_index = 0;
+
+        trace[col_index].data[round_index] = PackedM31::zero();
+        col_index += 1;
 
         let external_idx_1 = PackedM31::from_array(std::array::from_fn(|i| {
             BaseField::from_u32_unchecked(flow.0[vec_index * N_LANES + i].2.wire as u32)
@@ -622,6 +705,9 @@ pub fn gen_trace(
     let padding_start = (flow.0.len() / 16) * 23;
     for round_index in padding_start..(1 << (log_size - LOG_N_LANES)) {
         let mut col_index = 0;
+
+        trace[col_index].data[round_index] = PackedM31::zero();
+        col_index += 1;
 
         for _ in 0..N_STATE {
             trace[col_index].data[round_index] = PackedM31::zero();
@@ -667,7 +753,7 @@ pub fn gen_constant_trace(
     let _span = span!(Level::INFO, "Generation").entered();
     assert!(log_size >= LOG_N_LANES);
 
-    let mut constant_trace = (0..25)
+    let mut constant_trace = (0..26)
         .map(|_| Col::<SimdBackend, BaseField>::zeros(1 << log_size))
         .collect_vec();
 
@@ -726,7 +812,12 @@ pub fn gen_constant_trace(
         }));
         constant_trace[col_index].data[round_index] = is_external_idx_2_nonzero;
         col_index += 1;
-        assert_eq!(col_index, 9 + 16);
+        let swap_bit_addr = PackedM31::from_array(std::array::from_fn(|i| {
+            BaseField::from_u32_unchecked(flow.0[vec_index * N_LANES + i].4.addr as u32)
+        }));
+        constant_trace[col_index].data[round_index] = swap_bit_addr;
+        col_index += 1;
+        assert_eq!(col_index, 10 + 16);
 
         for r in 0..N_HALF_FULL_ROUNDS {
             round_index += 1;
@@ -763,7 +854,9 @@ pub fn gen_constant_trace(
             col_index += 1;
             constant_trace[col_index].data[round_index] = PackedM31::zero();
             col_index += 1;
-            assert_eq!(col_index, 9 + 16);
+            constant_trace[col_index].data[round_index] = PackedM31::zero();
+            col_index += 1;
+            assert_eq!(col_index, 10 + 16);
         }
 
         for r in 0..N_PARTIAL_ROUNDS {
@@ -806,7 +899,9 @@ pub fn gen_constant_trace(
             col_index += 1;
             constant_trace[col_index].data[round_index] = PackedM31::zero();
             col_index += 1;
-            assert_eq!(col_index, 9 + 16);
+            constant_trace[col_index].data[round_index] = PackedM31::zero();
+            col_index += 1;
+            assert_eq!(col_index, 10 + 16);
         }
 
         for r in 0..N_HALF_FULL_ROUNDS - 1 {
@@ -844,7 +939,9 @@ pub fn gen_constant_trace(
             col_index += 1;
             constant_trace[col_index].data[round_index] = PackedM31::zero();
             col_index += 1;
-            assert_eq!(col_index, 9 + 16);
+            constant_trace[col_index].data[round_index] = PackedM31::zero();
+            col_index += 1;
+            assert_eq!(col_index, 10 + 16);
         }
 
         round_index += 1;
@@ -901,7 +998,9 @@ pub fn gen_constant_trace(
         }));
         constant_trace[col_index].data[round_index] = is_external_idx_2_nonzero;
         col_index += 1;
-        assert_eq!(col_index, 9 + 16);
+        constant_trace[col_index].data[round_index] = PackedM31::zero();
+        col_index += 1;
+        assert_eq!(col_index, 10 + 16);
     }
 
     let padding_start = (flow.0.len() / 16) * 23;
@@ -933,8 +1032,10 @@ pub fn gen_constant_trace(
         col_index += 1;
         constant_trace[col_index].data[round_index] = PackedM31::zero();
         col_index += 1;
+        constant_trace[col_index].data[round_index] = PackedM31::zero();
+        col_index += 1;
 
-        assert_eq!(col_index, 9 + 16);
+        assert_eq!(col_index, 10 + 16);
     }
 
     let domain = CanonicCoset::new(log_size).circle_domain();
@@ -1011,6 +1112,11 @@ pub fn check_trace(
         let is_last_round = constant_trace[constant_col_index].data[vec_index];
         constant_col_index += 1;
 
+        let swap_addr_val = trace[trace_col_index].data[vec_index];
+        trace_col_index += 1;
+
+        let one_minus_swap_addr_val = PackedM31::one() - swap_addr_val;
+
         let in_state: [_; N_STATE] =
             std::array::from_fn(|i| trace[trace_col_index + i].data[vec_index]);
         trace_col_index += N_STATE;
@@ -1019,6 +1125,12 @@ pub fn check_trace(
         trace_col_index += N_STATE;
 
         let mut permuted_state = in_state.clone();
+        for i in 0..8 {
+            permuted_state[i] =
+                in_state[i] * one_minus_swap_addr_val + in_state[i + 8] * swap_addr_val;
+            permuted_state[i + 8] =
+                in_state[i] * swap_addr_val + in_state[i + 8] * one_minus_swap_addr_val;
+        }
         apply_external_round_matrix(&mut permuted_state);
         (0..N_STATE).for_each(|i| {
             assert!(
@@ -1119,72 +1231,76 @@ pub fn gen_interaction_trace(
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let is_first_round = constant_trace[0].data[vec_row];
-        let round_id = constant_trace[4].data[vec_row];
-
-        let is_not_first_round = PackedBaseField::one() - is_first_round;
-
-        let external_idx_1 = constant_trace[21].data[vec_row];
-        let external_idx_2 = constant_trace[22].data[vec_row];
-        let is_external_idx_1_nonzero = constant_trace[23].data[vec_row];
-        let is_external_idx_2_nonzero = constant_trace[24].data[vec_row];
-
-        let sel = is_external_idx_1_nonzero * is_first_round.clone();
-        let id = trace[32].data[vec_row];
-        let num0 = sel - is_not_first_round;
-        let mut denom0_arr = Vec::with_capacity(9);
-        denom0_arr.push(id);
-        for j in 0..8 {
-            denom0_arr.push(trace[j].data[vec_row]);
-        }
-        let denom0: PackedSecureField = lookup_elements.combine(&denom0_arr);
-
-        let sel = is_external_idx_2_nonzero * is_first_round.clone();
-        let id = trace[33].data[vec_row];
-        let num1 = sel - is_not_first_round;
-        let mut denom1_arr = Vec::with_capacity(9);
-        denom1_arr.push(id);
-        for j in 0..8 {
-            denom1_arr.push(trace[8 + j].data[vec_row]);
-        }
-        let denom1: PackedSecureField = lookup_elements.combine(&denom1_arr);
-
-        col_gen.write_frac(vec_row, denom1 * num0 + denom0 * num1, denom0 * denom1);
-    }
-    col_gen.finalize_col();
-
-    let mut col_gen = logup_gen.new_col();
-    for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let is_last_round = constant_trace[1].data[vec_row];
         let round_id = constant_trace[4].data[vec_row];
 
+        let is_not_first_round = PackedBaseField::one() - is_first_round;
         let is_not_last_round = PackedBaseField::one() - is_last_round;
 
         let external_idx_1 = constant_trace[21].data[vec_row];
         let external_idx_2 = constant_trace[22].data[vec_row];
         let is_external_idx_1_nonzero = constant_trace[23].data[vec_row];
         let is_external_idx_2_nonzero = constant_trace[24].data[vec_row];
+        let swap_bit_addr = constant_trace[25].data[vec_row];
+
+        let sel = is_external_idx_1_nonzero * is_first_round.clone();
+        let id = trace[33].data[vec_row];
+        let num0 = sel - is_not_first_round;
+        let mut denom0_arr = Vec::with_capacity(9);
+        denom0_arr.push(id);
+        for j in 0..8 {
+            denom0_arr.push(trace[1 + j].data[vec_row]);
+        }
+        let denom0: PackedSecureField = lookup_elements.combine(&denom0_arr);
+
+        let sel = is_external_idx_2_nonzero * is_first_round.clone();
+        let id = trace[34].data[vec_row];
+        let num1 = sel - is_not_first_round;
+        let mut denom1_arr = Vec::with_capacity(9);
+        denom1_arr.push(id);
+        for j in 0..8 {
+            denom1_arr.push(trace[9 + j].data[vec_row]);
+        }
+        let denom1: PackedSecureField = lookup_elements.combine(&denom1_arr);
+
+        let mut part1_denom = denom0 * denom1;
+        let mut part1_num = denom1 * num0 + denom0 * num1;
 
         let sel = is_external_idx_1_nonzero.clone() * is_last_round.clone();
-        let id = trace[34].data[vec_row];
+        let id = trace[35].data[vec_row];
         let num0 = sel + is_not_last_round;
         let mut denom0_arr = Vec::with_capacity(9);
         denom0_arr.push(id);
         for j in 0..8 {
-            denom0_arr.push(trace[16 + j].data[vec_row]);
+            denom0_arr.push(trace[17 + j].data[vec_row]);
         }
         let denom0: PackedSecureField = lookup_elements.combine(&denom0_arr);
 
         let sel = is_external_idx_2_nonzero.clone() * is_last_round.clone();
-        let id = trace[35].data[vec_row];
+        let id = trace[36].data[vec_row];
         let num1 = sel + is_not_last_round;
         let mut denom1_arr = Vec::with_capacity(9);
         denom1_arr.push(id);
         for j in 0..8 {
-            denom1_arr.push(trace[24 + j].data[vec_row]);
+            denom1_arr.push(trace[25 + j].data[vec_row]);
         }
         let denom1: PackedSecureField = lookup_elements.combine(&denom1_arr);
 
-        col_gen.write_frac(vec_row, denom1 * num0 + denom0 * num1, denom0 * denom1);
+        let mut part2_denom = denom0 * denom1;
+        let mut part2_num = denom1 * num0 + denom0 * num1;
+
+        let mut num = part1_denom * part2_num + part2_denom * part1_num;
+        let mut denom = part1_denom * part2_denom;
+
+        let swap_bit_val = trace[0].data[vec_row];
+        let num_swap = is_first_round * is_not_last_round;
+        let denom_swap: PackedSecureField = lookup_elements.combine(&[swap_bit_addr, swap_bit_val]);
+
+        col_gen.write_frac(
+            vec_row,
+            num * denom_swap + denom * num_swap,
+            denom * denom_swap,
+        );
     }
     col_gen.finalize_col();
 
@@ -1356,16 +1472,17 @@ pub fn prove_test_poseidon_accelerator(
                     wire: 123003,
                     hash: CONSTANT_3,
                 },
+                SwapOption::default(),
             ));
         } else {
             flow.0.push((
                 PoseidonEntry {
-                    wire: 256001,
-                    hash: TEST_1,
-                },
-                PoseidonEntry {
                     wire: 256002,
                     hash: TEST_2,
+                },
+                PoseidonEntry {
+                    wire: 256001,
+                    hash: TEST_1,
                 },
                 PoseidonEntry {
                     wire: 256003,
@@ -1375,6 +1492,7 @@ pub fn prove_test_poseidon_accelerator(
                     wire: 256004,
                     hash: TEST_4,
                 },
+                SwapOption::one(),
             ));
         }
     }

@@ -46,13 +46,13 @@ impl PlonkWithPoseidonStatement0 {
         let log_size_poseidon = self.log_size_poseidon;
 
         sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 10]);
-        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 25]);
+        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 26]);
 
         sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 12]);
-        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 36]);
+        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 37]);
 
         sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_plonk; 8]);
-        sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 8]);
+        sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 4]);
 
         sizes
     }
@@ -133,6 +133,7 @@ impl PlonkWithPoseidonComponents {
                     Poseidon::new("external_idx_2".to_string()).id(),
                     Poseidon::new("is_external_idx_1_nonzero".to_string()).id(),
                     Poseidon::new("is_external_idx_2_nonzero".to_string()).id(),
+                    Poseidon::new("swap_bit_addr".to_string()).id(),
                 ]
             )
             .collect_vec()[..],
@@ -376,7 +377,8 @@ mod test {
         PlonkWithAcceleratorLookupElements,
     };
     use crate::examples::plonk_with_poseidon::poseidon::{
-        prove_poseidon_accelerator, PoseidonEntry, PoseidonFlow, CONSTANT_1, CONSTANT_2, CONSTANT_3,
+        prove_poseidon_accelerator, PoseidonEntry, PoseidonFlow, SwapOption, CONSTANT_1,
+        CONSTANT_2, CONSTANT_3,
     };
 
     fn generate_test_circuit() -> (PlonkWithAcceleratorCircuitTrace, PoseidonFlow) {
@@ -455,6 +457,8 @@ mod test {
         c_wire.push(zero_var);
         op.push(M31::one());
 
+        mult_c[0] -= 16;
+
         // allocate 1
         mult_a.push(1);
         mult_b.push(1);
@@ -465,6 +469,8 @@ mod test {
         b_wire.push(zero_var);
         c_wire.push(one_var);
         op.push(M31::one());
+
+        mult_c[1] -= 16;
 
         let mut hash_idx = vec![];
 
@@ -557,7 +563,7 @@ mod test {
         for (&k, &v) in counts.iter() {
             if !v.is_zero() {
                 assert!(
-                    k == 1 && v == -1,
+                    (k == 1 && v == -17) || (k == 0 && v == -16),
                     "The logUp sum is not expected: {} {}",
                     k,
                     v
@@ -607,12 +613,12 @@ mod test {
             if i % 2 == 0 {
                 flow.0.push((
                     PoseidonEntry {
-                        wire: hash_idx[0],
-                        hash: TEST_1,
-                    },
-                    PoseidonEntry {
                         wire: hash_idx[1],
                         hash: TEST_2,
+                    },
+                    PoseidonEntry {
+                        wire: hash_idx[0],
+                        hash: TEST_1,
                     },
                     PoseidonEntry {
                         wire: hash_idx[2],
@@ -622,6 +628,7 @@ mod test {
                         wire: hash_idx[3],
                         hash: TEST_4,
                     },
+                    SwapOption::one(),
                 ));
             } else {
                 flow.0.push((
@@ -641,6 +648,7 @@ mod test {
                         wire: constant_idx[2],
                         hash: CONSTANT_3,
                     },
+                    SwapOption::default(),
                 ));
             }
         }

@@ -10,12 +10,11 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::instrument;
 
-use super::backend::{Col, CpuBackend};
+use super::backend::{Col, ColumnOps, CpuBackend};
 use super::channel::{Channel, MerkleChannel};
 use super::fields::m31::BaseField;
 use super::fields::qm31::{SecureField, QM31};
 use super::fields::secure_column::{SecureColumnByCoords, SECURE_EXTENSION_DEGREE};
-use super::fields::FieldOps;
 use super::poly::circle::{CircleDomain, PolyOps, SecureEvaluation};
 use super::poly::line::{LineEvaluation, LinePoly};
 use super::poly::twiddles::TwiddleTree;
@@ -34,7 +33,7 @@ use crate::core::vcs::verifier::{MerkleVerificationError, MerkleVerifier};
 
 /// FRI proof config
 // TODO(andrew): Support different step sizes.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct FriConfig {
     pub log_blowup_factor: u32,
     pub log_last_layer_degree_bound: u32,
@@ -73,9 +72,13 @@ impl FriConfig {
     const fn last_layer_domain_size(&self) -> usize {
         1 << (self.log_last_layer_degree_bound + self.log_blowup_factor)
     }
+
+    pub const fn security_bits(&self) -> u32 {
+        self.log_blowup_factor * self.n_queries as u32
+    }
 }
 
-pub trait FriOps: FieldOps<BaseField> + PolyOps + Sized + FieldOps<SecureField> {
+pub trait FriOps: ColumnOps<BaseField> + PolyOps + Sized + ColumnOps<SecureField> {
     /// Folds a degree `d` polynomial into a degree `d/2` polynomial.
     ///
     /// Let `eval` be a polynomial evaluated on a [LineDomain] `E`, `alpha` be a random field
@@ -194,7 +197,8 @@ impl<'a, B: FriOps + MerkleOps<MC::H>, MC: MerkleChannel> FriProver<'a, B, MC> {
 
     /// Builds and commits to the inner FRI layers (all layers except the first and last).
     ///
-    /// All `columns` must be provided in descending order by size.
+    /// All `columns` must be provided in descending order by size. Note there is at most one column
+    /// of each size.
     ///
     /// Returns all inner layers and the evaluation of the last layer.
     fn commit_inner_layers(
@@ -208,7 +212,6 @@ impl<'a, B: FriOps + MerkleOps<MC::H>, MC: MerkleChannel> FriProver<'a, B, MC> {
             v.len() >> CIRCLE_TO_LINE_FOLD_STEP
         }
 
-        let circle_poly_folding_alpha = channel.draw_felt();
         let first_inner_layer_log_size = folded_size(&columns[0]).ilog2();
         let first_inner_layer_domain =
             LineDomain::new(Coset::half_odds(first_inner_layer_log_size));
@@ -216,24 +219,26 @@ impl<'a, B: FriOps + MerkleOps<MC::H>, MC: MerkleChannel> FriProver<'a, B, MC> {
         let mut layer_evaluation = LineEvaluation::new_zero(first_inner_layer_domain);
         let mut columns = columns.iter().peekable();
         let mut layers = Vec::new();
+        let folding_alpha = channel.draw_felt();
+
+        // Folding the max size column.
+        B::fold_circle_into_line(
+            &mut layer_evaluation,
+            columns.next().unwrap(),
+            folding_alpha,
+            twiddles,
+        );
 
         while layer_evaluation.len() > config.last_layer_domain_size() {
-            // Check for circle polys in the first layer that should be combined in this layer.
-            while let Some(column) = columns.next_if(|c| folded_size(c) == layer_evaluation.len()) {
-                B::fold_circle_into_line(
-                    &mut layer_evaluation,
-                    column,
-                    circle_poly_folding_alpha,
-                    twiddles,
-                );
-            }
-
             let layer = FriInnerLayerProver::new(layer_evaluation);
             MC::mix_root(channel, layer.merkle_tree.root());
             let folding_alpha = channel.draw_felt();
-            let folded_layer_evaluation = B::fold_line(&layer.evaluation, folding_alpha, twiddles);
+            layer_evaluation = B::fold_line(&layer.evaluation, folding_alpha, twiddles);
 
-            layer_evaluation = folded_layer_evaluation;
+            // Check for circle polys in the first layer that should be combined in this layer.
+            if let Some(column) = columns.next_if(|c| folded_size(c) == layer_evaluation.len()) {
+                B::fold_circle_into_line(&mut layer_evaluation, column, folding_alpha, twiddles);
+            }
             layers.push(layer);
         }
 
@@ -447,10 +452,11 @@ impl<MC: MerkleChannel> FriVerifier<MC> {
         queries: &Queries,
         first_layer_query_evals: ColumnVec<Vec<SecureField>>,
     ) -> Result<(), FriVerificationError> {
-        let (inner_layer_queries, first_layer_folded_evals) =
+        let first_layer_sparse_evals =
             self.decommit_first_layer(queries, first_layer_query_evals)?;
+        let inner_layer_queries = queries.fold(CIRCLE_TO_LINE_FOLD_STEP);
         let (last_layer_queries, last_layer_query_evals) =
-            self.decommit_inner_layers(&inner_layer_queries, first_layer_folded_evals)?;
+            self.decommit_inner_layers(&inner_layer_queries, first_layer_sparse_evals)?;
         self.decommit_last_layer(last_layer_queries, last_layer_query_evals)
     }
 
@@ -462,9 +468,8 @@ impl<MC: MerkleChannel> FriVerifier<MC> {
         &self,
         queries: &Queries,
         first_layer_query_evals: ColumnVec<Vec<SecureField>>,
-    ) -> Result<(Queries, ColumnVec<Vec<SecureField>>), FriVerificationError> {
-        self.first_layer
-            .verify_and_fold(queries, first_layer_query_evals)
+    ) -> Result<ColumnVec<SparseEvaluation>, FriVerificationError> {
+        self.first_layer.verify(queries, first_layer_query_evals)
     }
 
     /// Verifies all inner layer decommitments.
@@ -473,41 +478,46 @@ impl<MC: MerkleChannel> FriVerifier<MC> {
     fn decommit_inner_layers(
         &self,
         queries: &Queries,
-        first_layer_folded_evals: ColumnVec<Vec<SecureField>>,
+        first_layer_sparse_evals: ColumnVec<SparseEvaluation>,
     ) -> Result<(Queries, Vec<SecureField>), FriVerificationError> {
-        let first_layer_fold_alpha = self.first_layer.folding_alpha;
-        let first_layer_fold_alpha_pow_fold_factor = first_layer_fold_alpha.square();
-
         let mut layer_queries = queries.clone();
         let mut layer_query_evals = vec![SecureField::zero(); layer_queries.len()];
-        let mut first_layer_folded_evals = first_layer_folded_evals.into_iter();
-        let mut first_layer_column_bounds = self.first_layer.column_bounds.iter().peekable();
+        let mut first_layer_sparse_evals = first_layer_sparse_evals.into_iter();
+        let first_layer_column_bounds = self.first_layer.column_bounds.iter();
+        let first_layer_column_domains = self.first_layer.column_commitment_domains.iter();
+        let mut first_layer_columns = first_layer_column_bounds
+            .zip_eq(first_layer_column_domains)
+            .peekable();
+        let mut previous_folding_alpha = self.first_layer.folding_alpha;
 
         for layer in self.inner_layers.iter() {
             // Check for evals committed in the first layer that need to be folded into this layer.
-            while first_layer_column_bounds
-                .next_if(|b| b.fold_to_line() == layer.degree_bound)
-                .is_some()
+            while let Some((_, column_domain)) =
+                first_layer_columns.next_if(|(b, _)| b.fold_to_line() == layer.degree_bound)
             {
-                let folded_column_evals = first_layer_folded_evals.next().unwrap();
+                // Use the previous layer's folding alpha to fold the circle's sparse evals into
+                // the current layer.
+                let folded_column_evals = first_layer_sparse_evals
+                    .next()
+                    .unwrap()
+                    .fold_circle(previous_folding_alpha, *column_domain);
 
-                for (curr_layer_eval, folded_column_eval) in
-                    zip_eq(&mut layer_query_evals, folded_column_evals)
-                {
-                    // TODO(andrew): As Ilya pointed out using the first layer's folding
-                    // alpha here might not be sound. Investigate.
-                    *curr_layer_eval *= first_layer_fold_alpha_pow_fold_factor;
-                    *curr_layer_eval += folded_column_eval;
-                }
+                accumulate_line(
+                    &mut layer_query_evals,
+                    &folded_column_evals,
+                    previous_folding_alpha,
+                );
             }
 
+            // Verify the layer and fold it using the current layer's folding alpha.
             (layer_queries, layer_query_evals) =
                 layer.verify_and_fold(layer_queries, layer_query_evals)?;
+            previous_folding_alpha = layer.folding_alpha;
         }
 
         // Check all values have been consumed.
-        assert!(first_layer_column_bounds.is_empty());
-        assert!(first_layer_folded_evals.is_empty());
+        assert!(first_layer_columns.is_empty());
+        assert!(first_layer_sparse_evals.is_empty());
 
         Ok((layer_queries, layer_query_evals))
     }
@@ -549,6 +559,18 @@ impl<MC: MerkleChannel> FriVerifier<MC> {
             get_query_positions_by_log_size(&queries, column_log_sizes);
         self.queries = Some(queries);
         query_positions_by_log_size
+    }
+}
+
+fn accumulate_line(
+    layer_query_evals: &mut [SecureField],
+    column_query_evals: &[SecureField],
+    folding_alpha: SecureField,
+) {
+    let folding_alpha_squared = folding_alpha.square();
+    for (curr_layer_eval, folded_column_eval) in zip_eq(layer_query_evals, column_query_evals) {
+        *curr_layer_eval *= folding_alpha_squared;
+        *curr_layer_eval += *folded_column_eval;
     }
 }
 
@@ -674,7 +696,8 @@ pub struct FriFirstLayerVerifier<H: MerkleHasher> {
 }
 
 impl<H: MerkleHasher> FriFirstLayerVerifier<H> {
-    /// Verifies the layer's merkle decommitment and returns the the folded queries and query evals.
+    /// Verifies the first layer's merkle decommitment, and returns the evaluations needed for
+    /// folding the columns to their corresponding layer.
     ///
     /// # Errors
     ///
@@ -687,18 +710,18 @@ impl<H: MerkleHasher> FriFirstLayerVerifier<H> {
     /// Panics if:
     /// * The queries are sampled on the wrong domain.
     /// * There are an invalid number of provided column evals.
-    fn verify_and_fold(
+    fn verify(
         &self,
         queries: &Queries,
         query_evals_by_column: ColumnVec<Vec<SecureField>>,
-    ) -> Result<(Queries, ColumnVec<Vec<SecureField>>), FriVerificationError> {
+    ) -> Result<ColumnVec<SparseEvaluation>, FriVerificationError> {
         // Columns are provided in descending order by size.
         let max_column_log_size = self.column_commitment_domains[0].log_size();
         assert_eq!(queries.log_domain_size, max_column_log_size);
 
         let mut fri_witness = self.proof.fri_witness.iter().copied();
         let mut decommitment_positions_by_log_size = BTreeMap::new();
-        let mut folded_evals_by_column = Vec::new();
+        let mut sparse_evals_by_column = Vec::new();
 
         let mut decommitmented_values = vec![];
         for (&column_domain, column_query_evals) in
@@ -728,9 +751,7 @@ impl<H: MerkleHasher> FriFirstLayerVerifier<H> {
                     .flatten()
                     .flat_map(|qm31| qm31.to_m31_array()),
             );
-
-            let folded_evals = sparse_evaluation.fold_circle(self.folding_alpha, column_domain);
-            folded_evals_by_column.push(folded_evals);
+            sparse_evals_by_column.push(sparse_evaluation);
         }
 
         // Check all proof evals have been consumed.
@@ -754,9 +775,7 @@ impl<H: MerkleHasher> FriFirstLayerVerifier<H> {
             )
             .map_err(|error| FriVerificationError::FirstLayerCommitmentInvalid { error })?;
 
-        let folded_queries = queries.fold(CIRCLE_TO_LINE_FOLD_STEP);
-
-        Ok((folded_queries, folded_evals_by_column))
+        Ok(sparse_evals_by_column)
     }
 }
 

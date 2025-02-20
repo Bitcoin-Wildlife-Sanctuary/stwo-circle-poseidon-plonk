@@ -143,12 +143,14 @@ impl<'a, B: BackendForChannel<MC>, MC: MerkleChannel> CommitmentSchemeProver<'a,
             queried_values,
             proof_of_work,
             fri_proof,
+            config: self.config,
         }
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommitmentSchemeProof<H: MerkleHasher> {
+    pub config: PcsConfig,
     pub commitments: TreeVec<H::Hash>,
     pub sampled_values: TreeVec<ColumnVec<Vec<SecureField>>>,
     pub decommitments: TreeVec<MerkleDecommitment<H>>,

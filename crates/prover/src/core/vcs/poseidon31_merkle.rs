@@ -90,7 +90,7 @@ impl MerkleHasher for Poseidon31MerkleHasher {
             (Some(hash_tree), None) => hash_tree,
             (None, Some(hash_column)) => hash_column,
             _ => {
-                unreachable!()
+                Poseidon31Hash([zero; 8])
             }
         }
     }

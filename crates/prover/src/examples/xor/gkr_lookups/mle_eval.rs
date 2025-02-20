@@ -8,7 +8,7 @@ use itertools::{chain, zip_eq, Itertools};
 use num_traits::{One, Zero};
 use tracing::{span, Level};
 
-use crate::constraint_framework::preprocessed_columns::gen_is_first;
+use crate::constraint_framework::preprocessed_columns::IsFirst;
 use crate::constraint_framework::{
     EvalAtRow, InfoEvaluator, PointEvaluator, SimdDomainEvaluator, TraceLocationAllocator,
 };
@@ -167,7 +167,7 @@ impl<O: MleCoeffColumnOracle> Component for MleEvalProverComponent<'_, '_, O> {
             accumulator,
             vanish_on_trace_eval_inv,
             self.log_size(),
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
 
         let carry_quotients_col_eval = eval_carry_quotient_col(&self.mle_eval_point, point);
@@ -210,7 +210,8 @@ impl<O: MleCoeffColumnOracle> ComponentProver<SimdBackend> for MleEvalProverComp
             .interpolate_with_twiddles(self.twiddles)
             .evaluate_with_twiddles(eval_domain, self.twiddles)
             .into_coordinate_evals();
-        let is_first_lde = gen_is_first::<SimdBackend>(self.log_size())
+        let is_first_lde = IsFirst::new(self.log_size())
+            .gen_column_simd()
             .interpolate_with_twiddles(self.twiddles)
             .evaluate_with_twiddles(eval_domain, self.twiddles);
         let aux_interaction = component_trace.len();
@@ -247,7 +248,7 @@ impl<O: MleCoeffColumnOracle> ComponentProver<SimdBackend> for MleEvalProverComp
                 trace_domain.log_size(),
                 eval_domain.log_size(),
                 self.log_size(),
-                (SecureField::zero(), None),
+                SecureField::zero(),
             );
             let [mle_coeffs_col_eval] = eval.next_extension_interaction_mask(aux_interaction, [0]);
             let [carry_quotients_col_eval] =
@@ -373,7 +374,7 @@ impl<O: MleCoeffColumnOracle> Component for MleEvalVerifierComponent<'_, O> {
             accumulator,
             vanish_on_trace_eval_inv,
             self.log_size(),
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
 
         let mle_coeff_col_eval = self.mle_coeff_column_oracle.evaluate_at_point(point, mask);
@@ -687,8 +688,7 @@ fn eval_step_selector(coset: Coset, log_step: u32, p: CirclePoint<SecureField>) 
     vanish_at_log_step.reverse();
     // We only need the first `log_step` many values.
     vanish_at_log_step.truncate(log_step as usize);
-    let mut vanish_at_log_step_inv = vec![SecureField::zero(); vanish_at_log_step.len()];
-    SecureField::batch_inverse(&vanish_at_log_step, &mut vanish_at_log_step_inv);
+    let vanish_at_log_step_inv = SecureField::batch_inverse(&vanish_at_log_step);
 
     let half_coset_selector_dbl = (vanish_at_log_step[0] * vanish_at_log_step_inv[1]).square();
     let vanish_substep_inv_sum = vanish_at_log_step_inv[1..].iter().sum::<SecureField>();
@@ -744,9 +744,7 @@ mod tests {
         eval_prefix_sum_constraints, gen_carry_quotient_col, MleEvalPoint, MleEvalProverComponent,
         MleEvalVerifierComponent,
     };
-    use crate::constraint_framework::preprocessed_columns::{
-        gen_is_first, gen_is_step_with_offset,
-    };
+    use crate::constraint_framework::preprocessed_columns::IsFirst;
     use crate::constraint_framework::{assert_constraints, EvalAtRow, TraceLocationAllocator};
     use crate::core::air::{Component, ComponentProver, Components};
     use crate::core::backend::cpu::bit_reverse;
@@ -767,6 +765,7 @@ mod tests {
     use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use crate::examples::xor::gkr_lookups::accumulation::MIN_LOG_BLOWUP_FACTOR;
     use crate::examples::xor::gkr_lookups::mle_eval::eval_step_selector_with_offset;
+    use crate::examples::xor::gkr_lookups::preprocessed_columns::IsStepWithOffset;
 
     #[test]
     fn mle_eval_prover_component() -> Result<(), VerificationError> {
@@ -811,7 +810,7 @@ mod tests {
         let mle_coeffs_col_component = MleCoeffColumnComponent::new(
             trace_location_allocator,
             MleCoeffColumnEval::new(COEFFS_COL_TRACE, mle.n_variables()),
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
         let mle_eval_component = MleEvalProverComponent::generate(
             trace_location_allocator,
@@ -835,7 +834,8 @@ mod tests {
 
         let log_sizes = components.column_log_sizes();
         let channel = &mut Blake2sChannel::default();
-        let commitment_scheme = &mut CommitmentSchemeVerifier::<Blake2sMerkleChannel>::new(config);
+        let commitment_scheme =
+            &mut CommitmentSchemeVerifier::<Blake2sMerkleChannel>::new(proof.config);
         commitment_scheme.commit(proof.commitments[0], &[], channel);
         commitment_scheme.commit(proof.commitments[1], &log_sizes[1], channel);
         commitment_scheme.commit(proof.commitments[2], &log_sizes[2], channel);
@@ -888,7 +888,7 @@ mod tests {
         let mle_coeffs_col_component = MleCoeffColumnComponent::new(
             trace_location_allocator,
             MleCoeffColumnEval::new(COEFFS_COL_TRACE, mle.n_variables()),
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
         let mle_eval_component = MleEvalProverComponent::generate(
             trace_location_allocator,
@@ -909,7 +909,7 @@ mod tests {
         let mle_coeffs_col_component = MleCoeffColumnComponent::new(
             trace_location_allocator,
             MleCoeffColumnEval::new(COEFFS_COL_TRACE, N_VARIABLES),
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
         let mle_eval_component = MleEvalVerifierComponent::new(
             trace_location_allocator,
@@ -925,7 +925,8 @@ mod tests {
 
         let log_sizes = components.column_log_sizes();
         let channel = &mut Blake2sChannel::default();
-        let commitment_scheme = &mut CommitmentSchemeVerifier::<Blake2sMerkleChannel>::new(config);
+        let commitment_scheme =
+            &mut CommitmentSchemeVerifier::<Blake2sMerkleChannel>::new(proof.config);
         commitment_scheme.commit(proof.commitments[0], &[], channel);
         commitment_scheme.commit(proof.commitments[1], &log_sizes[1], channel);
         commitment_scheme.commit(proof.commitments[2], &log_sizes[2], channel);
@@ -950,7 +951,7 @@ mod tests {
         let mle_coeffs_col_trace = mle_coeff_column::build_trace(&mle);
         let claim_shift = claim / BaseField::from(size);
         let carry_quotients_col = gen_carry_quotient_col(&eval_point).into_coordinate_evals();
-        let is_first_col = [gen_is_first(log_size)];
+        let is_first_col = [IsFirst::new(log_size).gen_column_simd()];
         let aux_trace = chain![carry_quotients_col, is_first_col].collect();
         let traces = TreeVec::new(vec![mle_coeffs_col_trace, mle_eval_trace, aux_trace]);
         let trace_polys = traces.map(|trace| trace.into_iter().map(|c| c.interpolate()).collect());
@@ -977,7 +978,7 @@ mod tests {
                     is_second_eval,
                 )
             },
-            (SecureField::zero(), None),
+            SecureField::zero(),
         )
     }
 
@@ -992,7 +993,7 @@ mod tests {
         let mle_eval_point = MleEvalPoint::new(&eval_point);
         let trace = build_trace(&mle, &eval_point, mle.eval_at_point(&eval_point));
         let carry_quotients_col = gen_carry_quotient_col(&eval_point).into_coordinate_evals();
-        let is_first_col = [gen_is_first(N_VARIABLES as u32)];
+        let is_first_col = [IsFirst::new(N_VARIABLES as u32).gen_column_simd()];
         let aux_trace = chain![carry_quotients_col, is_first_col].collect();
         let traces = TreeVec::new(vec![trace, aux_trace]);
         let trace_polys = traces.map(|trace| trace.into_iter().map(|c| c.interpolate()).collect());
@@ -1014,7 +1015,7 @@ mod tests {
                     is_second,
                 );
             },
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
     }
 
@@ -1029,7 +1030,7 @@ mod tests {
         let mle_eval_point = MleEvalPoint::new(&eval_point);
         let trace = build_trace(&mle, &eval_point, mle.eval_at_point(&eval_point));
         let carry_quotients_col = gen_carry_quotient_col(&eval_point).into_coordinate_evals();
-        let is_first_col = [gen_is_first(N_VARIABLES as u32)];
+        let is_first_col = [IsFirst::new(N_VARIABLES as u32).gen_column_simd()];
         let aux_trace = chain![carry_quotients_col, is_first_col].collect();
         let traces = TreeVec::new(vec![trace, aux_trace]);
         let trace_polys = traces.map(|trace| trace.into_iter().map(|c| c.interpolate()).collect());
@@ -1051,7 +1052,7 @@ mod tests {
                     is_second,
                 );
             },
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
     }
 
@@ -1066,7 +1067,7 @@ mod tests {
         let mle_eval_point = MleEvalPoint::new(&eval_point);
         let trace = build_trace(&mle, &eval_point, mle.eval_at_point(&eval_point));
         let carry_quotients_col = gen_carry_quotient_col(&eval_point).into_coordinate_evals();
-        let is_first_col = [gen_is_first(N_VARIABLES as u32)];
+        let is_first_col = [IsFirst::new(N_VARIABLES as u32).gen_column_simd()];
         let aux_trace = chain![carry_quotients_col, is_first_col].collect();
         let traces = TreeVec::new(vec![trace, aux_trace]);
         let trace_polys = traces.map(|trace| trace.into_iter().map(|c| c.interpolate()).collect());
@@ -1088,7 +1089,7 @@ mod tests {
                     is_second,
                 );
             },
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
     }
 
@@ -1110,7 +1111,7 @@ mod tests {
                 let [row_diff] = eval.next_extension_interaction_mask(0, [0]);
                 eval_prefix_sum_constraints(0, &mut eval, row_diff, cumulative_sum_shift)
             },
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
     }
 
@@ -1120,7 +1121,7 @@ mod tests {
         const OFFSET: usize = 1;
         const LOG_STEP: u32 = 2;
         let coset = CanonicCoset::new(LOG_SIZE).coset();
-        let col_eval = gen_is_step_with_offset::<SimdBackend>(LOG_SIZE, LOG_STEP, OFFSET);
+        let col_eval = IsStepWithOffset::new(LOG_SIZE, LOG_STEP, OFFSET).gen_column_simd();
         let col_poly = col_eval.interpolate();
         let p = SECURE_FIELD_CIRCLE_GEN;
 
@@ -1247,7 +1248,7 @@ mod tests {
                     &mut accumulator,
                     SecureField::one(),
                     self.log_size(),
-                    (SecureField::zero(), None),
+                    SecureField::zero(),
                 );
 
                 eval_mle_coeff_col(self.interaction, &mut eval)

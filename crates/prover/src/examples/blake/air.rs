@@ -5,10 +5,11 @@ use num_traits::Zero;
 use serde::Serialize;
 use tracing::{span, Level};
 
+use super::preprocessed_columns::XorTable;
 use super::round::{blake_round_info, BlakeRoundComponent, BlakeRoundEval};
 use super::scheduler::{BlakeSchedulerComponent, BlakeSchedulerEval};
 use super::xor_table::{xor12, xor4, xor7, xor8, xor9};
-use crate::constraint_framework::preprocessed_columns::{gen_is_first, PreprocessedColumn};
+use crate::constraint_framework::preprocessed_columns::{IsFirst, PreProcessedColumnId};
 use crate::constraint_framework::{TraceLocationAllocator, PREPROCESSED_TRACE_IDX};
 use crate::core::air::{Component, ComponentProver};
 use crate::core::backend::simd::m31::LOG_N_LANES;
@@ -26,28 +27,55 @@ use crate::examples::blake::{
     round, xor_table, BlakeXorElements, XorAccums, N_ROUNDS, ROUND_LOG_SPLIT,
 };
 
-const PREPROCESSED_XOR_COLUMNS: [PreprocessedColumn; 20] = [
-    PreprocessedColumn::XorTable(12, 4, 0),
-    PreprocessedColumn::XorTable(12, 4, 1),
-    PreprocessedColumn::XorTable(12, 4, 2),
-    PreprocessedColumn::IsFirst(xor12::column_bits::<12, 4>()),
-    PreprocessedColumn::XorTable(9, 2, 0),
-    PreprocessedColumn::XorTable(9, 2, 1),
-    PreprocessedColumn::XorTable(9, 2, 2),
-    PreprocessedColumn::IsFirst(xor9::column_bits::<9, 2>()),
-    PreprocessedColumn::XorTable(8, 2, 0),
-    PreprocessedColumn::XorTable(8, 2, 1),
-    PreprocessedColumn::XorTable(8, 2, 2),
-    PreprocessedColumn::IsFirst(xor8::column_bits::<8, 2>()),
-    PreprocessedColumn::XorTable(7, 2, 0),
-    PreprocessedColumn::XorTable(7, 2, 1),
-    PreprocessedColumn::XorTable(7, 2, 2),
-    PreprocessedColumn::IsFirst(xor7::column_bits::<7, 2>()),
-    PreprocessedColumn::XorTable(4, 0, 0),
-    PreprocessedColumn::XorTable(4, 0, 1),
-    PreprocessedColumn::XorTable(4, 0, 2),
-    PreprocessedColumn::IsFirst(xor4::column_bits::<4, 0>()),
-];
+fn preprocessed_xor_columns() -> [PreProcessedColumnId; 20] {
+    [
+        XorTable::new(12, 4, 0).id(),
+        XorTable::new(12, 4, 1).id(),
+        XorTable::new(12, 4, 2).id(),
+        IsFirst::new(XorTable::new(12, 4, 0).column_bits()).id(),
+        XorTable::new(9, 2, 0).id(),
+        XorTable::new(9, 2, 1).id(),
+        XorTable::new(9, 2, 2).id(),
+        IsFirst::new(XorTable::new(9, 2, 0).column_bits()).id(),
+        XorTable::new(8, 2, 0).id(),
+        XorTable::new(8, 2, 1).id(),
+        XorTable::new(8, 2, 2).id(),
+        IsFirst::new(XorTable::new(8, 2, 0).column_bits()).id(),
+        XorTable::new(7, 2, 0).id(),
+        XorTable::new(7, 2, 1).id(),
+        XorTable::new(7, 2, 2).id(),
+        IsFirst::new(XorTable::new(7, 2, 0).column_bits()).id(),
+        XorTable::new(4, 0, 0).id(),
+        XorTable::new(4, 0, 1).id(),
+        XorTable::new(4, 0, 2).id(),
+        IsFirst::new(XorTable::new(4, 0, 0).column_bits()).id(),
+    ]
+}
+
+const fn preprocessed_xor_columns_log_sizes() -> [u32; 20] {
+    [
+        XorTable::new(12, 4, 0).column_bits(),
+        XorTable::new(12, 4, 1).column_bits(),
+        XorTable::new(12, 4, 2).column_bits(),
+        XorTable::new(12, 4, 0).column_bits(),
+        XorTable::new(9, 2, 0).column_bits(),
+        XorTable::new(9, 2, 1).column_bits(),
+        XorTable::new(9, 2, 2).column_bits(),
+        XorTable::new(9, 2, 0).column_bits(),
+        XorTable::new(8, 2, 0).column_bits(),
+        XorTable::new(8, 2, 1).column_bits(),
+        XorTable::new(8, 2, 2).column_bits(),
+        XorTable::new(8, 2, 0).column_bits(),
+        XorTable::new(7, 2, 0).column_bits(),
+        XorTable::new(7, 2, 1).column_bits(),
+        XorTable::new(7, 2, 2).column_bits(),
+        XorTable::new(7, 2, 0).column_bits(),
+        XorTable::new(4, 0, 0).column_bits(),
+        XorTable::new(4, 0, 1).column_bits(),
+        XorTable::new(4, 0, 2).column_bits(),
+        XorTable::new(4, 0, 0).column_bits(),
+    ]
+}
 
 #[derive(Serialize)]
 pub struct BlakeStatement0 {
@@ -86,12 +114,7 @@ impl BlakeStatement0 {
         log_sizes[PREPROCESSED_TRACE_IDX] = chain!(
             [scheduler_is_first_column_log_size],
             blake_round_is_first_column_log_sizes,
-            PREPROCESSED_XOR_COLUMNS.map(|column| match column {
-                PreprocessedColumn::XorTable(elem_bits, expand_bits, _) =>
-                    2 * (elem_bits - expand_bits),
-                PreprocessedColumn::IsFirst(log_size) => log_size,
-                _ => panic!("Unexpected column"),
-            }),
+            preprocessed_xor_columns_log_sizes(),
         )
         .collect_vec();
 
@@ -164,16 +187,17 @@ impl BlakeComponents {
     fn new(stmt0: &BlakeStatement0, all_elements: &AllElements, stmt1: &BlakeStatement1) -> Self {
         let log_size = stmt0.log_size;
 
-        let scheduler_is_first_column = PreprocessedColumn::IsFirst(log_size);
-        let blake_round_is_first_columns_iter = ROUND_LOG_SPLIT
+        let scheduler_is_first_column = IsFirst::new(log_size).id();
+        let blake_round_is_first_columns_iter: Vec<PreProcessedColumnId> = ROUND_LOG_SPLIT
             .iter()
-            .map(|l| PreprocessedColumn::IsFirst(log_size + l));
+            .map(|l| IsFirst::new(log_size + l).id())
+            .collect_vec();
 
         let tree_span_provider = &mut TraceLocationAllocator::new_with_preproccessed_columns(
             &chain!(
                 [scheduler_is_first_column],
                 blake_round_is_first_columns_iter,
-                PREPROCESSED_XOR_COLUMNS,
+                preprocessed_xor_columns(),
             )
             .collect_vec()[..],
         );
@@ -185,9 +209,9 @@ impl BlakeComponents {
                     log_size: stmt0.log_size,
                     blake_lookup_elements: all_elements.blake_elements.clone(),
                     round_lookup_elements: all_elements.round_elements.clone(),
-                    total_sum: stmt1.scheduler_claimed_sum,
+                    claimed_sum: stmt1.scheduler_claimed_sum,
                 },
-                (stmt1.scheduler_claimed_sum, None),
+                stmt1.scheduler_claimed_sum,
             ),
             round_components: ROUND_LOG_SPLIT
                 .iter()
@@ -199,9 +223,9 @@ impl BlakeComponents {
                             log_size: stmt0.log_size + l,
                             xor_lookup_elements: all_elements.xor_elements.clone(),
                             round_lookup_elements: all_elements.round_elements.clone(),
-                            total_sum: claimed_sum,
+                            claimed_sum,
                         },
-                        (claimed_sum, None),
+                        claimed_sum,
                     )
                 })
                 .collect(),
@@ -211,7 +235,7 @@ impl BlakeComponents {
                     lookup_elements: all_elements.xor_elements.xor12.clone(),
                     claimed_sum: stmt1.xor12_claimed_sum,
                 },
-                (stmt1.xor12_claimed_sum, None),
+                stmt1.xor12_claimed_sum,
             ),
             xor9: xor9::XorTableComponent::new(
                 tree_span_provider,
@@ -219,7 +243,7 @@ impl BlakeComponents {
                     lookup_elements: all_elements.xor_elements.xor9.clone(),
                     claimed_sum: stmt1.xor9_claimed_sum,
                 },
-                (stmt1.xor9_claimed_sum, None),
+                stmt1.xor9_claimed_sum,
             ),
             xor8: xor8::XorTableComponent::new(
                 tree_span_provider,
@@ -227,7 +251,7 @@ impl BlakeComponents {
                     lookup_elements: all_elements.xor_elements.xor8.clone(),
                     claimed_sum: stmt1.xor8_claimed_sum,
                 },
-                (stmt1.xor8_claimed_sum, None),
+                stmt1.xor8_claimed_sum,
             ),
             xor7: xor7::XorTableComponent::new(
                 tree_span_provider,
@@ -235,7 +259,7 @@ impl BlakeComponents {
                     lookup_elements: all_elements.xor_elements.xor7.clone(),
                     claimed_sum: stmt1.xor7_claimed_sum,
                 },
-                (stmt1.xor7_claimed_sum, None),
+                stmt1.xor7_claimed_sum,
             ),
             xor4: xor4::XorTableComponent::new(
                 tree_span_provider,
@@ -243,7 +267,7 @@ impl BlakeComponents {
                     lookup_elements: all_elements.xor_elements.xor4.clone(),
                     claimed_sum: stmt1.xor4_claimed_sum,
                 },
-                (stmt1.xor4_claimed_sum, None),
+                stmt1.xor4_claimed_sum,
             ),
         }
     }
@@ -322,13 +346,15 @@ where
     let mut tree_builder = commitment_scheme.tree_builder();
     tree_builder.extend_evals(
         chain![
-            vec![gen_is_first(log_size)],
-            ROUND_LOG_SPLIT.iter().map(|l| gen_is_first(log_size + l)),
-            xor_table::xor12::generate_constant_trace::<12, 4>(),
-            xor_table::xor9::generate_constant_trace::<9, 2>(),
-            xor_table::xor8::generate_constant_trace::<8, 2>(),
-            xor_table::xor7::generate_constant_trace::<7, 2>(),
-            xor_table::xor4::generate_constant_trace::<4, 0>(),
+            vec![IsFirst::new(log_size).gen_column_simd()],
+            ROUND_LOG_SPLIT
+                .iter()
+                .map(|l| IsFirst::new(log_size + l).gen_column_simd()),
+            XorTable::new(12, 4, 0).generate_constant_trace(),
+            XorTable::new(9, 2, 0).generate_constant_trace(),
+            XorTable::new(8, 2, 0).generate_constant_trace(),
+            XorTable::new(7, 2, 0).generate_constant_trace(),
+            XorTable::new(4, 0, 0).generate_constant_trace(),
         ]
         .collect_vec(),
     );
@@ -482,10 +508,12 @@ pub fn verify_blake<MC: MerkleChannel>(
         stmt1,
         stark_proof,
     }: BlakeProof<MC::H>,
-    config: PcsConfig,
 ) -> Result<(), VerificationError> {
+    // TODO(alonf): Consider mixing the config into the channel.
     let channel = &mut MC::C::default();
-    let commitment_scheme = &mut CommitmentSchemeVerifier::<MC>::new(config);
+    const REQUIRED_SECURITY_BITS: u32 = 5;
+    assert!(stark_proof.config.security_bits() >= REQUIRED_SECURITY_BITS);
+    let commitment_scheme = &mut CommitmentSchemeVerifier::<MC>::new(stark_proof.config);
 
     let log_sizes = stmt0.log_sizes();
 
@@ -506,7 +534,7 @@ pub fn verify_blake<MC: MerkleChannel>(
     let components = BlakeComponents::new(&stmt0, &all_elements, &stmt1);
 
     // Check that all sums are correct.
-    let total_sum = stmt1.scheduler_claimed_sum
+    let claimed_sum = stmt1.scheduler_claimed_sum
         + stmt1.round_claimed_sums.iter().sum::<SecureField>()
         + stmt1.xor12_claimed_sum
         + stmt1.xor9_claimed_sum
@@ -515,7 +543,7 @@ pub fn verify_blake<MC: MerkleChannel>(
         + stmt1.xor4_claimed_sum;
 
     // TODO(shahars): Add inputs to sum, and constraint them.
-    assert_eq!(total_sum, SecureField::zero());
+    assert_eq!(claimed_sum, SecureField::zero());
 
     verify(
         &components.components(),
@@ -553,6 +581,6 @@ mod tests {
         let proof = prove_blake::<Blake2sMerkleChannel>(log_n_instances, config);
 
         // Verify.
-        verify_blake::<Blake2sMerkleChannel>(proof, config).unwrap();
+        verify_blake::<Blake2sMerkleChannel>(proof).unwrap();
     }
 }

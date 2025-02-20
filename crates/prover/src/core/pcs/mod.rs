@@ -12,6 +12,8 @@ pub mod quotients;
 mod utils;
 mod verifier;
 
+use serde::{Deserialize, Serialize};
+
 pub use self::prover::{
     CommitmentSchemeProof, CommitmentSchemeProver, CommitmentTreeProver, TreeBuilder,
 };
@@ -26,16 +28,34 @@ pub struct TreeSubspan {
     pub col_end: usize,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct PcsConfig {
     pub pow_bits: u32,
     pub fri_config: FriConfig,
 }
+impl PcsConfig {
+    pub const fn security_bits(&self) -> u32 {
+        self.pow_bits + self.fri_config.security_bits()
+    }
+}
+
 impl Default for PcsConfig {
     fn default() -> Self {
         Self {
             pow_bits: 5,
             fri_config: FriConfig::new(0, 1, 3),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_security_bits() {
+        let config = super::PcsConfig {
+            pow_bits: 42,
+            fri_config: super::FriConfig::new(10, 10, 70),
+        };
+        assert!(config.security_bits() == 10 * 70 + 42);
     }
 }

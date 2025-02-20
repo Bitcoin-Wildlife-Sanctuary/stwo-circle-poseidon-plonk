@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use num_traits::{One, Zero};
 
-use super::logup::{LogupAtRow, LogupSums};
-use super::preprocessed_columns::PreprocessedColumn;
+use super::logup::LogupAtRow;
+use super::preprocessed_columns::PreProcessedColumnId;
 use super::{EvalAtRow, INTERACTION_TRACE_IDX};
 use crate::constraint_framework::PREPROCESSED_TRACE_IDX;
 use crate::core::fields::m31::BaseField;
@@ -22,21 +22,21 @@ use crate::core::pcs::TreeVec;
 pub struct InfoEvaluator {
     pub mask_offsets: TreeVec<Vec<Vec<isize>>>,
     pub n_constraints: usize,
-    pub preprocessed_columns: Vec<PreprocessedColumn>,
+    pub preprocessed_columns: Vec<PreProcessedColumnId>,
     pub logup: LogupAtRow<Self>,
     pub arithmetic_counts: ArithmeticCounts,
 }
 impl InfoEvaluator {
     pub fn new(
         log_size: u32,
-        preprocessed_columns: Vec<PreprocessedColumn>,
-        logup_sums: LogupSums,
+        preprocessed_columns: Vec<PreProcessedColumnId>,
+        claimed_sum: SecureField,
     ) -> Self {
         Self {
             mask_offsets: Default::default(),
             n_constraints: Default::default(),
             preprocessed_columns,
-            logup: LogupAtRow::new(INTERACTION_TRACE_IDX, logup_sums.0, logup_sums.1, log_size),
+            logup: LogupAtRow::new(INTERACTION_TRACE_IDX, claimed_sum, log_size),
             arithmetic_counts: Default::default(),
         }
     }
@@ -44,7 +44,7 @@ impl InfoEvaluator {
     /// Create an empty `InfoEvaluator`, to measure components before their size and logup sums are
     /// available.
     pub fn empty() -> Self {
-        Self::new(16, vec![], (SecureField::default(), None))
+        Self::new(16, vec![], SecureField::default())
     }
 }
 impl EvalAtRow for InfoEvaluator {
@@ -70,7 +70,7 @@ impl EvalAtRow for InfoEvaluator {
         array::from_fn(|_| FieldCounter::one())
     }
 
-    fn get_preprocessed_column(&mut self, column: PreprocessedColumn) -> Self::F {
+    fn get_preprocessed_column(&mut self, column: PreProcessedColumnId) -> Self::F {
         self.preprocessed_columns.push(column);
         FieldCounter::one()
     }

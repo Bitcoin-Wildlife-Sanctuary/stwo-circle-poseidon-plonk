@@ -2,40 +2,33 @@ use num_traits::Zero;
 
 use super::{BaseExpr, ExtExpr};
 use crate::constraint_framework::expr::ColumnExpr;
-use crate::constraint_framework::preprocessed_columns::PreprocessedColumn;
+use crate::constraint_framework::preprocessed_columns::PreProcessedColumnId;
 use crate::constraint_framework::{EvalAtRow, Relation, RelationEntry, INTERACTION_TRACE_IDX};
-use crate::core::fields::m31;
 use crate::core::lookups::utils::Fraction;
 
 pub struct FormalLogupAtRow {
     pub interaction: usize,
-    pub total_sum: ExtExpr,
-    pub claimed_sum: Option<(ExtExpr, usize)>,
+    pub claimed_sum: ExtExpr,
     pub fracs: Vec<Fraction<ExtExpr, ExtExpr>>,
     pub is_finalized: bool,
     pub is_first: BaseExpr,
-    pub log_size: u32,
+    pub cumsum_shift: ExtExpr,
 }
 
-// P is an offset no column can reach, it signifies the variable
-// offset, which is an input to the verifier.
-pub const CLAIMED_SUM_DUMMY_OFFSET: usize = m31::P as usize;
-
 impl FormalLogupAtRow {
-    pub fn new(interaction: usize, has_partial_sum: bool, log_size: u32) -> Self {
-        let total_sum_name = "total_sum".to_string();
+    pub fn new(interaction: usize) -> Self {
         let claimed_sum_name = "claimed_sum".to_string();
+        let column_size_name = "column_size".to_string();
 
         Self {
             interaction,
             // TODO(alont): Should these be Expr::SecureField?
-            total_sum: ExtExpr::Param(total_sum_name),
-            claimed_sum: has_partial_sum
-                .then_some((ExtExpr::Param(claimed_sum_name), CLAIMED_SUM_DUMMY_OFFSET)),
+            claimed_sum: ExtExpr::Param(claimed_sum_name.clone()),
             fracs: vec![],
             is_finalized: true,
             is_first: BaseExpr::zero(),
-            log_size,
+            cumsum_shift: ExtExpr::Param(claimed_sum_name)
+                * BaseExpr::Inv(Box::new(BaseExpr::Param(column_size_name))),
         }
     }
 }
@@ -67,12 +60,18 @@ pub struct ExprEvaluator {
     pub ext_intermediates: Vec<(String, ExtExpr)>,
 }
 
+impl Default for ExprEvaluator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExprEvaluator {
-    pub fn new(log_size: u32, has_partial_sum: bool) -> Self {
+    pub fn new() -> Self {
         Self {
             cur_var_index: Default::default(),
             constraints: Default::default(),
-            logup: FormalLogupAtRow::new(INTERACTION_TRACE_IDX, has_partial_sum, log_size),
+            logup: FormalLogupAtRow::new(INTERACTION_TRACE_IDX),
             intermediates: vec![],
             ext_intermediates: vec![],
         }
@@ -174,8 +173,8 @@ impl EvalAtRow for ExprEvaluator {
         intermediate
     }
 
-    fn get_preprocessed_column(&mut self, column: PreprocessedColumn) -> Self::F {
-        BaseExpr::Param(column.name().to_string())
+    fn get_preprocessed_column(&mut self, column: PreProcessedColumnId) -> Self::F {
+        BaseExpr::Param(column.id)
     }
 
     crate::constraint_framework::logup_proxy!();
@@ -193,7 +192,7 @@ mod tests {
     #[test]
     fn test_expr_evaluator() {
         let test_struct = TestStruct {};
-        let eval = test_struct.evaluate(ExprEvaluator::new(16, false));
+        let eval = test_struct.evaluate(ExprEvaluator::new());
         let expected = "let intermediate0 = (trace_1_column_1_offset_0) * (trace_1_column_2_offset_0);
 
 \
@@ -207,8 +206,8 @@ mod tests {
 
 \
         let constraint_1 = (QM31Impl::from_partial_evals([trace_2_column_3_offset_0, trace_2_column_4_offset_0, trace_2_column_5_offset_0, trace_2_column_6_offset_0]) \
-            - (QM31Impl::from_partial_evals([trace_2_column_3_offset_neg_1, trace_2_column_4_offset_neg_1, trace_2_column_5_offset_neg_1, trace_2_column_6_offset_neg_1]) \
-                - ((total_sum) * (preprocessed_is_first)))) \
+            - (QM31Impl::from_partial_evals([trace_2_column_3_offset_neg_1, trace_2_column_4_offset_neg_1, trace_2_column_5_offset_neg_1, trace_2_column_6_offset_neg_1])) \
+                + (claimed_sum) * (1 / (column_size))) \
             * (intermediate1) \
             - (qm31(1, 0, 0, 0));"
             .to_string();

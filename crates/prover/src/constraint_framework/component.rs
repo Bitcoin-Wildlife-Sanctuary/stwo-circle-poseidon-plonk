@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::iter::zip;
 use std::ops::Deref;
@@ -10,8 +9,7 @@ use rayon::prelude::*;
 use tracing::{span, Level};
 
 use super::cpu_domain::CpuDomainEvaluator;
-use super::logup::LogupSums;
-use super::preprocessed_columns::PreprocessedColumn;
+use super::preprocessed_columns::PreProcessedColumnId;
 use super::{
     EvalAtRow, InfoEvaluator, PointEvaluator, SimdDomainEvaluator, PREPROCESSED_TRACE_IDX,
 };
@@ -49,7 +47,7 @@ pub struct TraceLocationAllocator {
     /// Mapping of tree index to next available column offset.
     next_tree_offsets: TreeVec<usize>,
     /// Mapping of preprocessed columns to their index.
-    preprocessed_columns: HashMap<PreprocessedColumn, usize>,
+    preprocessed_columns: Vec<PreProcessedColumnId>,
     /// Controls whether the preprocessed columns are dynamic or static (default=Dynamic).
     preprocessed_columns_allocation_mode: PreprocessedColumnsAllocationMode,
 }
@@ -81,31 +79,29 @@ impl TraceLocationAllocator {
     }
 
     /// Create a new `TraceLocationAllocator` with fixed preprocessed columns setup.
-    pub fn new_with_preproccessed_columns(preprocessed_columns: &[PreprocessedColumn]) -> Self {
+    pub fn new_with_preproccessed_columns(preprocessed_columns: &[PreProcessedColumnId]) -> Self {
+        assert!(
+            preprocessed_columns.iter().all_unique(),
+            "Duplicate preprocessed columns are not allowed!"
+        );
         Self {
             next_tree_offsets: Default::default(),
-            preprocessed_columns: preprocessed_columns
-                .iter()
-                .enumerate()
-                .map(|(i, &col)| (col, i))
-                .collect(),
+            preprocessed_columns: preprocessed_columns.to_vec(),
             preprocessed_columns_allocation_mode: PreprocessedColumnsAllocationMode::Static,
         }
     }
 
-    pub const fn preprocessed_columns(&self) -> &HashMap<PreprocessedColumn, usize> {
+    pub const fn preprocessed_columns(&self) -> &Vec<PreProcessedColumnId> {
         &self.preprocessed_columns
     }
 
     // validates that `self.preprocessed_columns` is consistent with
     // `preprocessed_columns`.
     // I.e. preprocessed_columns[i] == self.preprocessed_columns[i].
-    pub fn validate_preprocessed_columns(&self, preprocessed_columns: &[PreprocessedColumn]) {
-        assert_eq!(preprocessed_columns.len(), self.preprocessed_columns.len());
-
-        for (column, idx) in self.preprocessed_columns.iter() {
-            assert_eq!(Some(column), preprocessed_columns.get(*idx));
-        }
+    // TODO(Gali): Change to only validating that this is a permutation (not necessarily the same
+    // order).
+    pub fn validate_preprocessed_columns(&self, preprocessed_columns: &[PreProcessedColumnId]) {
+        assert_eq!(self.preprocessed_columns, preprocessed_columns);
     }
 }
 
@@ -123,20 +119,20 @@ pub trait FrameworkEval {
 }
 
 pub struct FrameworkComponent<C: FrameworkEval> {
-    pub eval: C,
-    pub trace_locations: TreeVec<TreeSubspan>,
-    pub info: InfoEvaluator,
-    pub preprocessed_column_indices: Vec<usize>,
-    pub logup_sums: LogupSums,
+    pub(super) eval: C,
+    pub(super) trace_locations: TreeVec<TreeSubspan>,
+    pub(super) preprocessed_column_indices: Vec<usize>,
+    info: InfoEvaluator,
+    claimed_sum: SecureField,
 }
 
 impl<E: FrameworkEval> FrameworkComponent<E> {
     pub fn new(
         location_allocator: &mut TraceLocationAllocator,
         eval: E,
-        logup_sums: LogupSums,
+        claimed_sum: SecureField,
     ) -> Self {
-        let info = eval.evaluate(InfoEvaluator::new(eval.log_size(), vec![], logup_sums));
+        let info = eval.evaluate(InfoEvaluator::new(eval.log_size(), vec![], claimed_sum));
         let trace_locations = location_allocator.next_for_structure(&info.mask_offsets);
 
         let preprocessed_column_indices = info
@@ -144,22 +140,25 @@ impl<E: FrameworkEval> FrameworkComponent<E> {
             .iter()
             .map(|col| {
                 let next_column = location_allocator.preprocessed_columns.len();
-                *location_allocator
+                if let Some(pos) = location_allocator
                     .preprocessed_columns
-                    .entry(*col)
-                    .or_insert_with(|| {
-                        if matches!(
-                            location_allocator.preprocessed_columns_allocation_mode,
-                            PreprocessedColumnsAllocationMode::Static
-                        ) {
-                            panic!(
-                                "Preprocessed column {:?} is missing from static alloction",
-                                col
-                            );
-                        }
-
-                        next_column
-                    })
+                    .iter()
+                    .position(|x| x.id == col.id)
+                {
+                    pos
+                } else {
+                    if matches!(
+                        location_allocator.preprocessed_columns_allocation_mode,
+                        PreprocessedColumnsAllocationMode::Static
+                    ) {
+                        panic!(
+                            "Preprocessed column {:?} is missing from static allocation",
+                            col
+                        );
+                    }
+                    location_allocator.preprocessed_columns.push(col.clone());
+                    next_column
+                }
             })
             .collect();
         Self {
@@ -167,7 +166,7 @@ impl<E: FrameworkEval> FrameworkComponent<E> {
             trace_locations,
             info,
             preprocessed_column_indices,
-            logup_sums,
+            claimed_sum,
         }
     }
 
@@ -238,7 +237,7 @@ impl<E: FrameworkEval> Component for FrameworkComponent<E> {
             evaluation_accumulator,
             coset_vanishing(CanonicCoset::new(self.eval.log_size()).coset, point).inverse(),
             self.eval.log_size(),
-            self.logup_sums,
+            self.claimed_sum,
         ));
     }
 }
@@ -319,7 +318,7 @@ impl<E: FrameworkEval + Sync> ComponentProver<SimdBackend> for FrameworkComponen
                     trace_domain.log_size(),
                     eval_domain.log_size(),
                     self.eval.log_size(),
-                    self.logup_sums,
+                    self.claimed_sum,
                 );
                 let row_res = self.eval.evaluate(eval).row_res;
 
@@ -348,7 +347,7 @@ impl<E: FrameworkEval + Sync> ComponentProver<SimdBackend> for FrameworkComponen
         // Define any `self` values outside the loop to prevent the compiler thinking there is a
         // `Sync` requirement on `Self`.
         let self_eval = &self.eval;
-        let self_logup_sums = self.logup_sums;
+        let self_claimed_sum = self.claimed_sum;
 
         iter.for_each(|(chunk_idx, mut chunk)| {
             let trace_cols = trace.as_cols_ref().map_cols(|c| c.as_ref());
@@ -363,7 +362,7 @@ impl<E: FrameworkEval + Sync> ComponentProver<SimdBackend> for FrameworkComponen
                     trace_domain.log_size(),
                     eval_domain.log_size(),
                     self_eval.log_size(),
-                    self_logup_sums,
+                    self_claimed_sum,
                 );
                 let row_res = self_eval.evaluate(eval).row_res;
 

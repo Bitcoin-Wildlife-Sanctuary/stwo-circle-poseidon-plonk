@@ -5,7 +5,6 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use tracing::{span, Level};
 
-use crate::constraint_framework::preprocessed_columns::{gen_is_first, PreprocessedColumn};
 use crate::constraint_framework::{
     Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX,
     PREPROCESSED_TRACE_IDX,
@@ -23,13 +22,12 @@ use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
 use crate::core::poly::BitReversedOrder;
 use crate::core::prover::{prove, verify, StarkProof, VerificationError};
 use crate::core::vcs::ops::MerkleHasher;
+use crate::examples::plonk::Plonk;
 use crate::examples::plonk_with_poseidon::plonk::{
     PlonkWithAcceleratorCircuitTrace, PlonkWithAcceleratorComponent, PlonkWithAcceleratorEval,
     PlonkWithAcceleratorLookupElements,
 };
-use crate::examples::plonk_with_poseidon::poseidon::{
-    check_trace, PoseidonAcceleratorComponent, PoseidonAcceleratorEval, PoseidonFlow,
-};
+use crate::examples::plonk_with_poseidon::poseidon::{check_trace, Poseidon, PoseidonAcceleratorComponent, PoseidonAcceleratorEval, PoseidonFlow};
 use crate::examples::plonk_with_poseidon::{plonk, poseidon};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -45,8 +43,8 @@ impl PlonkWithPoseidonStatement0 {
         let log_size_plonk = self.log_size_plonk;
         let log_size_poseidon = self.log_size_poseidon;
 
-        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 11]);
-        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 26]);
+        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 10]);
+        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 25]);
 
         sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 12]);
         sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 36]);
@@ -96,45 +94,43 @@ impl PlonkWithPoseidonComponents {
         let tree_span_provider = &mut TraceLocationAllocator::new_with_preproccessed_columns(
             &chain!(
                 [
-                    PreprocessedColumn::Plonk(0),
-                    PreprocessedColumn::Plonk(1),
-                    PreprocessedColumn::Plonk(2),
-                    PreprocessedColumn::Plonk(3),
-                    PreprocessedColumn::Plonk(4),
-                    PreprocessedColumn::Plonk(5),
-                    PreprocessedColumn::Plonk(6),
-                    PreprocessedColumn::Plonk(7),
-                    PreprocessedColumn::Plonk(8),
-                    PreprocessedColumn::Plonk(9),
-                    PreprocessedColumn::IsFirst(stmt0.log_size_plonk as u32),
+                    Plonk::new("a_wire".to_string()).id(),
+                    Plonk::new("b_wire".to_string()).id(),
+                    Plonk::new("c_wire".to_string()).id(),
+                    Plonk::new("op".to_string()).id(),
+                    Plonk::new("mult_a".to_string()).id(),
+                    Plonk::new("mult_b".to_string()).id(),
+                    Plonk::new("mult_c".to_string()).id(),
+                    Plonk::new("poseidon_wire".to_string()).id(),
+                    Plonk::new("mult_poseidon".to_string()).id(),
+                    Plonk::new("enforce_c_m31".to_string()).id(),
                 ],
                 [
-                    PreprocessedColumn::Poseidon(0),
-                    PreprocessedColumn::Poseidon(1),
-                    PreprocessedColumn::Poseidon(2),
-                    PreprocessedColumn::Poseidon(3),
-                    PreprocessedColumn::Poseidon(4),
-                    PreprocessedColumn::Poseidon(5),
-                    PreprocessedColumn::Poseidon(6),
-                    PreprocessedColumn::Poseidon(7),
-                    PreprocessedColumn::Poseidon(8),
-                    PreprocessedColumn::Poseidon(9),
-                    PreprocessedColumn::Poseidon(10),
-                    PreprocessedColumn::Poseidon(11),
-                    PreprocessedColumn::Poseidon(12),
-                    PreprocessedColumn::Poseidon(13),
-                    PreprocessedColumn::Poseidon(14),
-                    PreprocessedColumn::Poseidon(15),
-                    PreprocessedColumn::Poseidon(16),
-                    PreprocessedColumn::Poseidon(17),
-                    PreprocessedColumn::Poseidon(18),
-                    PreprocessedColumn::Poseidon(19),
-                    PreprocessedColumn::Poseidon(20),
-                    PreprocessedColumn::Poseidon(21),
-                    PreprocessedColumn::Poseidon(22),
-                    PreprocessedColumn::Poseidon(23),
-                    PreprocessedColumn::Poseidon(24),
-                    PreprocessedColumn::IsFirst(stmt0.log_size_poseidon as u32),
+                    Poseidon::new("is_first_round".to_string()).id(),
+                    Poseidon::new("is_last_round".to_string()).id(),
+                    Poseidon::new("is_full_round".to_string()).id(),
+                    Poseidon::new("is_partial_round".to_string()).id(),
+                    Poseidon::new("round_id".to_string()).id(),
+                    Poseidon::new("rc 0".to_string()).id(),
+                    Poseidon::new("rc 1".to_string()).id(),
+                    Poseidon::new("rc 2".to_string()).id(),
+                    Poseidon::new("rc 3".to_string()).id(),
+                    Poseidon::new("rc 4".to_string()).id(),
+                    Poseidon::new("rc 5".to_string()).id(),
+                    Poseidon::new("rc 6".to_string()).id(),
+                    Poseidon::new("rc 7".to_string()).id(),
+                    Poseidon::new("rc 8".to_string()).id(),
+                    Poseidon::new("rc 9".to_string()).id(),
+                    Poseidon::new("rc 10".to_string()).id(),
+                    Poseidon::new("rc 11".to_string()).id(),
+                    Poseidon::new("rc 12".to_string()).id(),
+                    Poseidon::new("rc 13".to_string()).id(),
+                    Poseidon::new("rc 14".to_string()).id(),
+                    Poseidon::new("rc 15".to_string()).id(),
+                    Poseidon::new("external_idx_1".to_string()).id(),
+                    Poseidon::new("external_idx_2".to_string()).id(),
+                    Poseidon::new("is_external_idx_1_nonzero".to_string()).id(),
+                    Poseidon::new("is_external_idx_2_nonzero".to_string()).id(),
                 ]
             )
             .collect_vec()[..],
@@ -148,7 +144,7 @@ impl PlonkWithPoseidonComponents {
                     lookup_elements: lookup_elements.clone(),
                     total_sum: stmt1.plonk_total_sum,
                 },
-                (stmt1.plonk_total_sum, None),
+                stmt1.plonk_total_sum
             ),
             poseidon: PoseidonAcceleratorComponent::new(
                 tree_span_provider,
@@ -157,7 +153,7 @@ impl PlonkWithPoseidonComponents {
                     lookup_elements: lookup_elements.clone(),
                     total_sum: stmt1.poseidon_total_sum,
                 },
-                (stmt1.poseidon_total_sum, None),
+                stmt1.poseidon_total_sum
             ),
         }
     }
@@ -207,8 +203,7 @@ where
     let mut commitment_scheme = CommitmentSchemeProver::new(config, &twiddles);
 
     // Preprocessed trace
-    let is_first = gen_is_first(log_size_plonk);
-    let mut plonk_constant_trace = [
+    let plonk_constant_trace = [
         circuit.a_wire.clone(),
         circuit.b_wire.clone(),
         circuit.c_wire.clone(),
@@ -228,7 +223,6 @@ where
         )
     })
     .collect_vec();
-    plonk_constant_trace.push(is_first);
 
     let poseidon_trace = poseidon::gen_trace(flow);
     let poseidon_constant_trace = poseidon::gen_constant_trace(flow);

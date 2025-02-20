@@ -5,7 +5,6 @@ use num_traits::One;
 use tracing::{span, Level};
 
 use crate::constraint_framework::logup::LogupTraceGenerator;
-use crate::constraint_framework::preprocessed_columns::{gen_is_first, PreprocessedColumn};
 use crate::constraint_framework::{
     assert_constraints, EvalAtRow, FrameworkComponent, FrameworkEval, Relation, RelationEntry,
     TraceLocationAllocator,
@@ -24,6 +23,7 @@ use crate::core::poly::BitReversedOrder;
 use crate::core::prover::{prove, StarkProof};
 use crate::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
 use crate::core::ColumnVec;
+use crate::examples::plonk::Plonk;
 use crate::relation;
 
 pub type PlonkWithAcceleratorComponent = FrameworkComponent<PlonkWithAcceleratorEval>;
@@ -46,18 +46,18 @@ impl FrameworkEval for PlonkWithAcceleratorEval {
     }
 
     fn evaluate<E: EvalAtRow>(&self, mut eval: E) -> E {
-        let a_wire = eval.get_preprocessed_column(PreprocessedColumn::Plonk(0));
-        let b_wire = eval.get_preprocessed_column(PreprocessedColumn::Plonk(1));
+        let a_wire = eval.get_preprocessed_column(Plonk::new("a_wire".to_string()).id());
+        let b_wire = eval.get_preprocessed_column(Plonk::new("b_wire".to_string()).id());
         // Note: c_wire could also be implicit: (self.eval.point() - M31_CIRCLE_GEN.into_ef()).x.
         //   A constant column is easier though.
-        let c_wire = eval.get_preprocessed_column(PreprocessedColumn::Plonk(2));
-        let op = eval.get_preprocessed_column(PreprocessedColumn::Plonk(3));
-        let mult_a = eval.get_preprocessed_column(PreprocessedColumn::Plonk(4));
-        let mult_b = eval.get_preprocessed_column(PreprocessedColumn::Plonk(5));
-        let mult_c = eval.get_preprocessed_column(PreprocessedColumn::Plonk(6));
-        let poseidon_wire = eval.get_preprocessed_column(PreprocessedColumn::Plonk(7));
-        let mult_poseidon = eval.get_preprocessed_column(PreprocessedColumn::Plonk(8));
-        let enforce_c_m31 = eval.get_preprocessed_column(PreprocessedColumn::Plonk(9));
+        let c_wire = eval.get_preprocessed_column(Plonk::new("c_wire".to_string()).id());
+        let op = eval.get_preprocessed_column(Plonk::new("op".to_string()).id());
+        let mult_a = eval.get_preprocessed_column(Plonk::new("mult_a".to_string()).id());
+        let mult_b = eval.get_preprocessed_column(Plonk::new("mult_b".to_string()).id());
+        let mult_c = eval.get_preprocessed_column(Plonk::new("mult_c".to_string()).id());
+        let poseidon_wire = eval.get_preprocessed_column(Plonk::new("poseidon_wire".to_string()).id());
+        let mult_poseidon = eval.get_preprocessed_column(Plonk::new("mult_poseidon".to_string()).id());
+        let enforce_c_m31 = eval.get_preprocessed_column(Plonk::new("enforce_c_m31".to_string()).id());
 
         let a_val_0 = eval.next_trace_mask();
         let a_val_1 = eval.next_trace_mask();
@@ -287,8 +287,7 @@ where
     // Preprocessed trace.
     let span = span!(Level::INFO, "Constant").entered();
     let mut tree_builder = commitment_scheme.tree_builder();
-    let is_first = gen_is_first(log_n_rows);
-    let mut constant_trace = [
+    let constant_trace = [
         circuit.a_wire.clone(),
         circuit.b_wire.clone(),
         circuit.c_wire.clone(),
@@ -308,7 +307,6 @@ where
         )
     })
     .collect_vec();
-    constant_trace.push(is_first);
     tree_builder.extend_evals(constant_trace);
     tree_builder.commit(channel);
     span.exit();
@@ -339,7 +337,7 @@ where
             lookup_elements,
             total_sum,
         },
-        (total_sum, None),
+        total_sum
     );
 
     // Sanity check. Remove for production.
@@ -353,7 +351,7 @@ where
         |eval| {
             component.evaluate(eval);
         },
-        (total_sum, None),
+        total_sum
     );
 
     let proof = prove(&[&component], channel, commitment_scheme).unwrap();

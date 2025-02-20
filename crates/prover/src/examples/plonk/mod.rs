@@ -2,8 +2,8 @@ use itertools::Itertools;
 use num_traits::One;
 use tracing::{span, Level};
 
-use crate::constraint_framework::logup::{ClaimedPrefixSum, LogupTraceGenerator, LookupElements};
-use crate::constraint_framework::preprocessed_columns::{gen_is_first, PreprocessedColumn};
+use crate::constraint_framework::logup::{LogupTraceGenerator, LookupElements};
+use crate::constraint_framework::preprocessed_columns::PreProcessedColumnId;
 use crate::constraint_framework::{
     assert_constraints, relation, EvalAtRow, FrameworkComponent, FrameworkEval, RelationEntry,
     TraceLocationAllocator,
@@ -32,8 +32,7 @@ relation!(PlonkLookupElements, 2);
 pub struct PlonkEval {
     pub log_n_rows: u32,
     pub lookup_elements: PlonkLookupElements,
-    pub claimed_sum: ClaimedPrefixSum,
-    pub total_sum: SecureField,
+    pub claimed_sum: SecureField,
     pub base_trace_location: TreeSubspan,
     pub interaction_trace_location: TreeSubspan,
     pub constants_trace_location: TreeSubspan,
@@ -49,12 +48,12 @@ impl FrameworkEval for PlonkEval {
     }
 
     fn evaluate<E: EvalAtRow>(&self, mut eval: E) -> E {
-        let a_wire = eval.get_preprocessed_column(PreprocessedColumn::Plonk(0));
-        let b_wire = eval.get_preprocessed_column(PreprocessedColumn::Plonk(1));
+        let a_wire = eval.get_preprocessed_column(Plonk::new("wire_a".to_string()).id());
+        let b_wire = eval.get_preprocessed_column(Plonk::new("wire_b".to_string()).id());
         // Note: c_wire could also be implicit: (self.eval.point() - M31_CIRCLE_GEN.into_ef()).x.
         //   A constant column is easier though.
-        let c_wire = eval.get_preprocessed_column(PreprocessedColumn::Plonk(2));
-        let op = eval.get_preprocessed_column(PreprocessedColumn::Plonk(3));
+        let c_wire = eval.get_preprocessed_column(Plonk::new("wire_c".to_string()).id());
+        let op = eval.get_preprocessed_column(Plonk::new("op".to_string()).id());
 
         let mult = eval.next_trace_mask();
         let a_val = eval.next_trace_mask();
@@ -119,12 +118,11 @@ pub fn gen_trace(
 
 pub fn gen_interaction_trace(
     log_size: u32,
-    padding_offset: usize,
     circuit: &PlonkCircuitTrace,
     lookup_elements: &LookupElements<2>,
 ) -> (
     ColumnVec<CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>>,
-    [SecureField; 2],
+    SecureField,
 ) {
     let _span = span!(Level::INFO, "Generate interaction trace").entered();
     let mut logup_gen = LogupTraceGenerator::new(log_size);
@@ -148,7 +146,7 @@ pub fn gen_interaction_trace(
     }
     col_gen.finalize_col();
 
-    logup_gen.finalize_at([(1 << log_size) - 1, padding_offset])
+    logup_gen.finalize_last()
 }
 
 #[allow(unused)]
@@ -163,7 +161,6 @@ pub fn prove_fibonacci_plonk(
     for _ in 0..(1 << log_n_rows) {
         fib_values.push(fib_values[fib_values.len() - 1] + fib_values[fib_values.len() - 2]);
     }
-    let padding_offset = 17;
     let range = 0..(1 << log_n_rows);
     let mut circuit = PlonkCircuitTrace {
         mult: range.clone().map(|_| 2.into()).collect(),
@@ -195,7 +192,6 @@ pub fn prove_fibonacci_plonk(
     // Preprocessed trace.
     let span = span!(Level::INFO, "Constant").entered();
     let mut tree_builder = commitment_scheme.tree_builder();
-    let is_first = gen_is_first(log_n_rows);
     let mut constant_trace = [
         circuit.a_wire.clone(),
         circuit.b_wire.clone(),
@@ -210,7 +206,6 @@ pub fn prove_fibonacci_plonk(
         )
     })
     .collect_vec();
-    constant_trace.push(is_first);
     let constants_trace_location = tree_builder.extend_evals(constant_trace);
     tree_builder.commit(channel);
     span.exit();
@@ -228,8 +223,7 @@ pub fn prove_fibonacci_plonk(
 
     // Interaction trace.
     let span = span!(Level::INFO, "Interaction").entered();
-    let (trace, [total_sum, claimed_sum]) =
-        gen_interaction_trace(log_n_rows, padding_offset, &circuit, &lookup_elements.0);
+    let (trace, claimed_sum) = gen_interaction_trace(log_n_rows, &circuit, &lookup_elements.0);
     let mut tree_builder = commitment_scheme.tree_builder();
     let interaction_trace_location = tree_builder.extend_evals(trace);
     tree_builder.commit(channel);
@@ -240,13 +234,12 @@ pub fn prove_fibonacci_plonk(
         PlonkEval {
             log_n_rows,
             lookup_elements,
-            claimed_sum: (claimed_sum, padding_offset),
-            total_sum,
+            claimed_sum,
             base_trace_location,
             interaction_trace_location,
             constants_trace_location,
         },
-        (total_sum, Some((claimed_sum, padding_offset))),
+        claimed_sum,
     );
 
     // Sanity check. Remove for production.
@@ -260,12 +253,31 @@ pub fn prove_fibonacci_plonk(
         |mut eval| {
             component.evaluate(eval);
         },
-        (total_sum, Some((claimed_sum, padding_offset))),
+        claimed_sum,
     );
 
     let proof = prove(&[&component], channel, commitment_scheme).unwrap();
 
     (component, proof)
+}
+
+/// Preprocessed columns for describing a plonk circuit.
+/// Each plonk gate is described by input wires `a_wire`, `b_wire`, output wire `c_wire`, and
+/// operation `op`.  
+#[derive(Debug)]
+pub struct Plonk {
+    pub name: String,
+}
+impl Plonk {
+    pub const fn new(name: String) -> Self {
+        Self { name }
+    }
+
+    pub fn id(&self) -> PreProcessedColumnId {
+        PreProcessedColumnId {
+            id: format!("preprocessed_plonk_{}", self.name),
+        }
+    }
 }
 
 #[cfg(test)]

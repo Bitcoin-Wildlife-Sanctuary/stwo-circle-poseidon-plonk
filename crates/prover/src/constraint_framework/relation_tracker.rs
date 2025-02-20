@@ -4,11 +4,9 @@ use std::fmt::Debug;
 use itertools::Itertools;
 use num_traits::Zero;
 
-use super::logup::LogupSums;
-use super::preprocessed_columns::PreprocessedColumn;
 use super::{
-    Batching, EvalAtRow, FrameworkEval, InfoEvaluator, Relation, RelationEntry,
-    TraceLocationAllocator, INTERACTION_TRACE_IDX,
+    Batching, EvalAtRow, FrameworkComponent, FrameworkEval, Relation, RelationEntry,
+    TraceLocationAllocator, INTERACTION_TRACE_IDX, PREPROCESSED_TRACE_IDX,
 };
 use crate::core::backend::simd::m31::{PackedBaseField, LOG_N_LANES, N_LANES};
 use crate::core::backend::simd::qm31::PackedSecureField;
@@ -16,6 +14,7 @@ use crate::core::backend::simd::very_packed_m31::LOG_N_VERY_PACKED_ELEMS;
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::Column;
 use crate::core::fields::m31::{BaseField, M31};
+use crate::core::fields::qm31::QM31;
 use crate::core::fields::secure_column::SECURE_EXTENSION_DEGREE;
 use crate::core::lookups::utils::Fraction;
 use crate::core::pcs::{TreeSubspan, TreeVec};
@@ -35,21 +34,21 @@ pub struct RelationTrackerEntry {
 pub struct RelationTrackerComponent<E: FrameworkEval> {
     eval: E,
     trace_locations: TreeVec<TreeSubspan>,
+    preprocessed_column_indices: Vec<usize>,
     n_rows: usize,
 }
 impl<E: FrameworkEval> RelationTrackerComponent<E> {
     pub fn new(location_allocator: &mut TraceLocationAllocator, eval: E, n_rows: usize) -> Self {
-        let info = eval.evaluate(InfoEvaluator::new(
-            eval.log_size(),
-            vec![],
-            LogupSums::default(),
-        ));
-        let mut mask_offsets = info.mask_offsets;
-        mask_offsets.drain(INTERACTION_TRACE_IDX..);
-        let trace_locations = location_allocator.next_for_structure(&mask_offsets);
+        let component = FrameworkComponent::<E>::new(location_allocator, eval, QM31::default());
+
+        // Interaction trace is no needed for relation tracker.
+        let mut trace_locations = component.trace_locations;
+        trace_locations.truncate(INTERACTION_TRACE_IDX);
+
         Self {
-            eval,
+            eval: component.eval,
             trace_locations,
+            preprocessed_column_indices: component.preprocessed_column_indices,
             n_rows,
         }
     }
@@ -61,9 +60,14 @@ impl<E: FrameworkEval> RelationTrackerComponent<E> {
         let log_size = self.eval.log_size();
 
         // Deref the sub-tree. Only copies the references.
-        let sub_tree = trace
+        let mut sub_tree = trace
             .sub_tree(&self.trace_locations)
             .map(|vec| vec.into_iter().copied().collect_vec());
+        sub_tree[PREPROCESSED_TRACE_IDX] = self
+            .preprocessed_column_indices
+            .iter()
+            .map(|idx| trace[PREPROCESSED_TRACE_IDX][*idx])
+            .collect();
         let mut entries = vec![];
 
         for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
@@ -144,10 +148,6 @@ impl EvalAtRow for RelationTrackerEvaluator<'_> {
                 self.trace_eval[interaction][col_index].at(row_index)
             }))
         })
-    }
-
-    fn get_preprocessed_column(&mut self, column: PreprocessedColumn) -> Self::F {
-        column.packed_at(self.vec_row)
     }
 
     fn add_constraint<G>(&mut self, _constraint: G) {}

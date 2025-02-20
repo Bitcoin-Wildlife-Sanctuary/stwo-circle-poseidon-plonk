@@ -19,7 +19,7 @@ pub use component::{FrameworkComponent, FrameworkEval, TraceLocationAllocator};
 pub use info::InfoEvaluator;
 use num_traits::{One, Zero};
 pub use point::PointEvaluator;
-use preprocessed_columns::PreprocessedColumn;
+use preprocessed_columns::PreProcessedColumnId;
 pub use simd_domain::SimdDomainEvaluator;
 
 use crate::core::fields::m31::BaseField;
@@ -87,7 +87,7 @@ pub trait EvalAtRow {
         mask_item
     }
 
-    fn get_preprocessed_column(&mut self, _column: PreprocessedColumn) -> Self::F {
+    fn get_preprocessed_column(&mut self, _column: PreProcessedColumnId) -> Self::F {
         let [mask_item] = self.next_interaction_mask(PREPROCESSED_TRACE_IDX, [0]);
         mask_item
     }
@@ -172,11 +172,6 @@ macro_rules! logup_proxy {
     () => {
         fn write_logup_frac(&mut self, fraction: Fraction<Self::EF, Self::EF>) {
             if self.logup.fracs.is_empty() {
-                self.logup.is_first = self.get_preprocessed_column(
-                    crate::constraint_framework::preprocessed_columns::PreprocessedColumn::IsFirst(
-                        self.logup.log_size,
-                    ),
-                );
                 self.logup.is_finalized = false;
             }
             self.logup.fracs.push(fraction.clone());
@@ -226,35 +221,16 @@ macro_rules! logup_proxy {
             }
 
             let frac: Fraction<_, _> = fracs_by_batch[&last_batch].clone().into_iter().sum();
+            let [prev_row_cumsum, cur_cumsum] =
+                self.next_extension_interaction_mask(self.logup.interaction, [-1, 0]);
 
-            // TODO(ShaharS): remove `claimed_row_index` interaction value and get the shifted
-            // offset from the is_first column when constant columns are supported.
-            let (cur_cumsum, prev_row_cumsum) = match self.logup.claimed_sum.clone() {
-                Some((claimed_sum, claimed_row_index)) => {
-                    let [prev_row_cumsum, cur_cumsum, claimed_cumsum] = self
-                        .next_extension_interaction_mask(
-                            self.logup.interaction,
-                            [-1, 0, claimed_row_index as isize],
-                        );
+            let diff = cur_cumsum - prev_row_cumsum - prev_col_cumsum.clone();
+            // Instead of checking diff = num / denom, check diff = num / denom - cumsum_shift.
+            // This makes (num / denom - cumsum_shift) have sum zero, which makes the constraint
+            // uniform - apply on all rows.
+            let fixed_diff = diff + self.logup.cumsum_shift.clone();
 
-                    // Constrain that the claimed_sum in case that it is not equal to the total_sum.
-                    self.add_constraint(
-                        (claimed_cumsum - claimed_sum) * self.logup.is_first.clone(),
-                    );
-                    (cur_cumsum, prev_row_cumsum)
-                }
-                None => {
-                    let [prev_row_cumsum, cur_cumsum] =
-                        self.next_extension_interaction_mask(self.logup.interaction, [-1, 0]);
-                    (cur_cumsum, prev_row_cumsum)
-                }
-            };
-            // Fix `prev_row_cumsum` by subtracting `total_sum` if this is the first row.
-            let fixed_prev_row_cumsum =
-                prev_row_cumsum - self.logup.is_first.clone() * self.logup.total_sum.clone();
-            let diff = cur_cumsum - fixed_prev_row_cumsum - prev_col_cumsum.clone();
-
-            self.add_constraint(diff * frac.denominator - frac.numerator);
+            self.add_constraint(fixed_diff * frac.denominator - frac.numerator);
 
             self.logup.is_finalized = true;
         }

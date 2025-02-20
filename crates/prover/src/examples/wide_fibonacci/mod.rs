@@ -146,7 +146,7 @@ mod tests {
             &trace_polys,
             CanonicCoset::new(LOG_N_INSTANCES),
             fibonacci_constraint_evaluator::<LOG_N_INSTANCES>,
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
     }
 
@@ -166,7 +166,7 @@ mod tests {
             &trace_polys,
             CanonicCoset::new(LOG_N_INSTANCES),
             fibonacci_constraint_evaluator::<LOG_N_INSTANCES>,
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
     }
 
@@ -203,7 +203,7 @@ mod tests {
                 WideFibonacciEval::<FIB_SEQUENCE_LENGTH> {
                     log_n_rows: log_n_instances,
                 },
-                (SecureField::zero(), None),
+                SecureField::zero(),
             );
 
             let proof = prove::<SimdBackend, Blake2sMerkleChannel>(
@@ -261,7 +261,7 @@ mod tests {
             WideFibonacciEval::<FIB_SEQUENCE_LENGTH> {
                 log_n_rows: LOG_N_INSTANCES,
             },
-            (SecureField::zero(), None),
+            SecureField::zero(),
         );
         let proof = prove::<SimdBackend, Poseidon252MerkleChannel>(
             &[&component],
@@ -273,7 +273,7 @@ mod tests {
         // Verify.
         let verifier_channel = &mut Poseidon252Channel::default();
         let commitment_scheme =
-            &mut CommitmentSchemeVerifier::<Poseidon252MerkleChannel>::new(config);
+            &mut CommitmentSchemeVerifier::<Poseidon252MerkleChannel>::new(proof.config);
 
         // Retrieve the expected column sizes in each commitment interaction, from the AIR.
         let sizes = component.trace_log_degree_bounds();

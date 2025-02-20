@@ -27,7 +27,9 @@ use crate::examples::plonk_with_poseidon::plonk::{
     PlonkWithAcceleratorCircuitTrace, PlonkWithAcceleratorComponent, PlonkWithAcceleratorEval,
     PlonkWithAcceleratorLookupElements,
 };
-use crate::examples::plonk_with_poseidon::poseidon::{check_trace, Poseidon, PoseidonAcceleratorComponent, PoseidonAcceleratorEval, PoseidonFlow};
+use crate::examples::plonk_with_poseidon::poseidon::{
+    check_trace, Poseidon, PoseidonAcceleratorComponent, PoseidonAcceleratorEval, PoseidonFlow,
+};
 use crate::examples::plonk_with_poseidon::{plonk, poseidon};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -144,7 +146,7 @@ impl PlonkWithPoseidonComponents {
                     lookup_elements: lookup_elements.clone(),
                     total_sum: stmt1.plonk_total_sum,
                 },
-                stmt1.plonk_total_sum
+                stmt1.plonk_total_sum,
             ),
             poseidon: PoseidonAcceleratorComponent::new(
                 tree_span_provider,
@@ -153,7 +155,7 @@ impl PlonkWithPoseidonComponents {
                     lookup_elements: lookup_elements.clone(),
                     total_sum: stmt1.poseidon_total_sum,
                 },
-                stmt1.poseidon_total_sum
+                stmt1.poseidon_total_sum,
             ),
         }
     }

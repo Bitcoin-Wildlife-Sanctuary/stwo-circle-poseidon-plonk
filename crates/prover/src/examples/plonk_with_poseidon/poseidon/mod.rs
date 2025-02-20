@@ -10,11 +10,11 @@ use rand::{Rng, SeedableRng};
 use tracing::{span, Level};
 
 use crate::constraint_framework::logup::LogupTraceGenerator;
+use crate::constraint_framework::preprocessed_columns::PreProcessedColumnId;
 use crate::constraint_framework::{
     assert_constraints, EvalAtRow, FrameworkComponent, FrameworkEval, Relation, RelationEntry,
     TraceLocationAllocator,
 };
-use crate::constraint_framework::preprocessed_columns::PreProcessedColumnId;
 use crate::core::backend::simd::m31::{PackedBaseField, PackedM31, LOG_N_LANES, N_LANES};
 use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
@@ -52,7 +52,6 @@ impl Poseidon {
         }
     }
 }
-
 
 const N_STATE: usize = 16;
 const N_HALF_FULL_ROUNDS: usize = 4;
@@ -221,10 +220,14 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
     //     id_3 (temp) = 0
     //     id_4 (temp) = 0
 
-    let is_first_round = eval.get_preprocessed_column(Poseidon::new("is_first_round".to_string()).id());
-    let is_last_round = eval.get_preprocessed_column(Poseidon::new("is_last_round".to_string()).id());
-    let is_full_round = eval.get_preprocessed_column(Poseidon::new("is_full_round".to_string()).id());
-    let is_partial_round = eval.get_preprocessed_column(Poseidon::new("is_partial_round".to_string()).id());
+    let is_first_round =
+        eval.get_preprocessed_column(Poseidon::new("is_first_round".to_string()).id());
+    let is_last_round =
+        eval.get_preprocessed_column(Poseidon::new("is_last_round".to_string()).id());
+    let is_full_round =
+        eval.get_preprocessed_column(Poseidon::new("is_full_round".to_string()).id());
+    let is_partial_round =
+        eval.get_preprocessed_column(Poseidon::new("is_partial_round".to_string()).id());
 
     let is_not_first_round = E::F::one() - is_first_round.clone();
     let is_not_last_round = E::F::one() - is_last_round.clone();
@@ -236,11 +239,15 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
         rc.push(eval.get_preprocessed_column(Poseidon::new(format!("rc {}", i).to_string()).id()));
     }
 
-    let external_idx_1 = eval.get_preprocessed_column(Poseidon::new("external_idx_1".to_string()).id());
-    let external_idx_2 = eval.get_preprocessed_column(Poseidon::new("external_idx_2".to_string()).id());
+    let external_idx_1 =
+        eval.get_preprocessed_column(Poseidon::new("external_idx_1".to_string()).id());
+    let external_idx_2 =
+        eval.get_preprocessed_column(Poseidon::new("external_idx_2".to_string()).id());
 
-    let is_external_idx_1_nonzero = eval.get_preprocessed_column(Poseidon::new("is_external_idx_1_nonzero".to_string()).id());
-    let is_external_idx_2_nonzero = eval.get_preprocessed_column(Poseidon::new("is_external_idx_2_nonzero".to_string()).id());
+    let is_external_idx_1_nonzero =
+        eval.get_preprocessed_column(Poseidon::new("is_external_idx_1_nonzero".to_string()).id());
+    let is_external_idx_2_nonzero =
+        eval.get_preprocessed_column(Poseidon::new("is_external_idx_2_nonzero".to_string()).id());
 
     let in_state: [_; N_STATE] = std::array::from_fn(|_| eval.next_trace_mask());
     let out_state: [_; N_STATE] = std::array::from_fn(|_| eval.next_trace_mask());
@@ -1249,7 +1256,7 @@ where
             lookup_elements,
             total_sum,
         },
-        total_sum
+        total_sum,
     );
 
     // Sanity check. Remove for production.
@@ -1263,7 +1270,7 @@ where
         |eval| {
             component.evaluate(eval);
         },
-        total_sum
+        total_sum,
     );
 
     let proof = prove(&[&component], channel, commitment_scheme).unwrap();

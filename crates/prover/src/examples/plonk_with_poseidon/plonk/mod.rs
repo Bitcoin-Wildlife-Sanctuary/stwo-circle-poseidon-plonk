@@ -55,9 +55,12 @@ impl FrameworkEval for PlonkWithAcceleratorEval {
         let mult_a = eval.get_preprocessed_column(Plonk::new("mult_a".to_string()).id());
         let mult_b = eval.get_preprocessed_column(Plonk::new("mult_b".to_string()).id());
         let mult_c = eval.get_preprocessed_column(Plonk::new("mult_c".to_string()).id());
-        let poseidon_wire = eval.get_preprocessed_column(Plonk::new("poseidon_wire".to_string()).id());
-        let mult_poseidon = eval.get_preprocessed_column(Plonk::new("mult_poseidon".to_string()).id());
-        let enforce_c_m31 = eval.get_preprocessed_column(Plonk::new("enforce_c_m31".to_string()).id());
+        let poseidon_wire =
+            eval.get_preprocessed_column(Plonk::new("poseidon_wire".to_string()).id());
+        let mult_poseidon =
+            eval.get_preprocessed_column(Plonk::new("mult_poseidon".to_string()).id());
+        let enforce_c_m31 =
+            eval.get_preprocessed_column(Plonk::new("enforce_c_m31".to_string()).id());
 
         let a_val_0 = eval.next_trace_mask();
         let a_val_1 = eval.next_trace_mask();
@@ -337,7 +340,7 @@ where
             lookup_elements,
             total_sum,
         },
-        total_sum
+        total_sum,
     );
 
     // Sanity check. Remove for production.
@@ -351,7 +354,7 @@ where
         |eval| {
             component.evaluate(eval);
         },
-        total_sum
+        total_sum,
     );
 
     let proof = prove(&[&component], channel, commitment_scheme).unwrap();

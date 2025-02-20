@@ -67,7 +67,11 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                         PackedM31::from_array(array::from_fn(|k| input[2 * k + 1].0[i]))
                 }
 
-                Some(compress16(packed_input))
+                if columns.is_empty() {
+                    Some(permute_get_rate(packed_input))
+                } else {
+                    Some(permute_get_capacity(packed_input))
+                }
             } else {
                 None
             };
@@ -76,44 +80,52 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                 let len = columns.len();
                 let num_chunk = len.div_ceil(8);
 
-                let mut digest = if num_chunk == 1 {
-                    let mut res = [PackedM31::zero(); 8];
-                    for j in 0..len {
-                        res[j] = columns[j].data[i];
+                if num_chunk == 1 {
+                    let mut res = [PackedM31::zero(); 16];
+                    for j in 0..min(len, 8) {
+                        res[8 + j] = columns[j].data[i];
                     }
-                    res
+                    Some(permute_get_rate(res))
                 } else {
                     let mut res = [PackedM31::zero(); 16];
-                    for j in 0..min(len, 16) {
-                        res[j] = columns[j].data[i];
+                    for j in 0..8 {
+                        res[8 + j] = columns[j].data[i];
                     }
-                    compress16(res)
-                };
+                    let mut digest = permute_get_capacity(res);
 
-                for column_chunk in columns.chunks_exact(8).skip(2) {
-                    let mut state = [PackedM31::zero(); 16];
-                    for j in 0..8 {
-                        state[j] = digest[j];
+                    for column_chunk in columns.chunks_exact(8).skip(1).take(num_chunk - 2) {
+                        let mut state = [PackedM31::zero(); 16];
+                        for j in 0..8 {
+                            state[j] = digest[j];
+                        }
+                        for j in 0..8 {
+                            state[j + 8] = column_chunk[j].data[i];
+                        }
+                        digest = permute_get_capacity(state);
                     }
-                    for j in 0..8 {
-                        state[j + 8] = column_chunk[j].data[i];
+
+                    let remain = len % 8;
+                    if remain == 0 {
+                        let mut state = [PackedM31::zero(); 16];
+                        for j in 0..8 {
+                            state[j] = digest[j];
+                        }
+                        for j in 0..8 {
+                            state[j + 8] = columns[len - 8 + j].data[i];
+                        }
+                        digest = permute_get_rate(state);
+                    } else {
+                        let mut state = [PackedM31::zero(); 16];
+                        for j in 0..8 {
+                            state[j] = digest[j];
+                        }
+                        for j in 0..remain {
+                            state[j + 8] = columns[len - remain + j].data[i];
+                        }
+                        digest = permute_get_rate(state);
                     }
-                    digest = compress16(state);
+                    Some(digest)
                 }
-
-                let remain = len % 8;
-                if len > 16 && remain != 0 {
-                    let mut state = [PackedM31::zero(); 16];
-                    for j in 0..8 {
-                        state[j] = digest[j];
-                    }
-                    for j in 0..remain {
-                        state[j + 8] = columns[len - remain + j].data[i];
-                    }
-                    digest = compress16(state);
-                }
-
-                Some(digest)
             } else {
                 None
             };
@@ -127,7 +139,7 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                     for j in 0..8 {
                         state[j + 8] = hash_column[j];
                     }
-                    compress16(state)
+                    permute_get_rate(state)
                 }
                 (Some(hash_tree), None) => hash_tree,
                 (None, Some(hash_column)) => hash_column,
@@ -230,13 +242,14 @@ pub(crate) fn permute(mut state: [PackedM31; 16]) -> [PackedM31; 16] {
     state
 }
 
-fn compress16(state: [PackedM31; 16]) -> [PackedM31; 8] {
+pub fn permute_get_capacity(state: [PackedM31; 16]) -> [PackedM31; 8] {
     let permuted_state = permute(state);
-    let mut res = permuted_state.first_chunk::<8>().unwrap().clone();
-    for i in 0..8 {
-        res[i] += state[i];
-    }
-    res
+    permuted_state.last_chunk::<8>().unwrap().clone()
+}
+
+pub fn permute_get_rate(state: [PackedM31; 16]) -> [PackedM31; 8] {
+    let permuted_state = permute(state);
+    permuted_state.first_chunk::<8>().unwrap().clone()
 }
 
 #[cfg(test)]
@@ -246,7 +259,7 @@ mod test {
     use rand::{Rng, SeedableRng};
 
     use crate::core::backend::simd::m31::PackedM31;
-    use crate::core::backend::simd::poseidon31::compress16;
+    use crate::core::backend::simd::poseidon31::{permute_get_capacity, permute_get_rate};
     use crate::core::backend::simd::SimdBackend;
     use crate::core::backend::{Col, CpuBackend};
     use crate::core::fields::m31::{BaseField, M31};
@@ -258,14 +271,12 @@ mod test {
     fn test_permute_consistency() {
         let mut prng = SmallRng::seed_from_u64(0);
         let test_inputs: [[M31; 16]; 16] = prng.gen();
-        let mut test_outputs = [[M31::zero(); 8]; 16];
+        let mut test_outputs = [[M31::zero(); 16]; 16];
 
         for i in 0..16 {
             let mut state = test_inputs[i].clone();
             poseidon2_permute(&mut state);
-            for j in 0..8 {
-                test_outputs[i][j] = state[j] + test_inputs[i][j];
-            }
+            test_outputs[i].copy_from_slice(&state);
         }
 
         let mut packed_inputs = [PackedM31::zero(); 16];
@@ -290,11 +301,19 @@ mod test {
             ]);
         }
 
-        let packed_output = compress16(packed_inputs);
+        let packed_output = permute_get_rate(packed_inputs);
         for i in 0..8 {
             let arr = packed_output[i].to_array();
             for j in 0..16 {
                 assert_eq!(arr[j], test_outputs[j][i]);
+            }
+        }
+
+        let packed_output = permute_get_capacity(packed_inputs);
+        for i in 0..8 {
+            let arr = packed_output[i].to_array();
+            for j in 0..16 {
+                assert_eq!(arr[j], test_outputs[j][8 + i]);
             }
         }
     }

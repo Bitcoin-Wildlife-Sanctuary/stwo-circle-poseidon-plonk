@@ -366,7 +366,7 @@ impl Poseidon31Hasher {
 pub struct Poseidon31CRH;
 
 impl Poseidon31CRH {
-    pub fn compress(data: &[M31]) -> [M31; 8] {
+    pub fn permute_get_capacity(data: &[M31]) -> [M31; 8] {
         assert_eq!(data.len(), 16);
 
         let zero = M31::zero();
@@ -374,9 +374,17 @@ impl Poseidon31CRH {
         cur.copy_from_slice(data);
 
         poseidon2_permute(&mut cur);
-        for i in 0..8 {
-            cur[i] += data[i];
-        }
+        *cur.last_chunk().unwrap()
+    }
+
+    pub fn permute_get_rate(data: &[M31]) -> [M31; 8] {
+        assert_eq!(data.len(), 16);
+
+        let zero = M31::zero();
+        let mut cur = [zero; 16];
+        cur.copy_from_slice(data);
+
+        poseidon2_permute(&mut cur);
         *cur.first_chunk().unwrap()
     }
 }

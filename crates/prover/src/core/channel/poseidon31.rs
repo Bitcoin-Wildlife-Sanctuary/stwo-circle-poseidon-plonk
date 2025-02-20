@@ -51,9 +51,6 @@ impl Poseidon31Channel {
         ];
 
         poseidon2_permute(&mut state);
-
-        state[0] += n_sent;
-
         self.channel_time.inc_sent();
 
         // extract elements from the first 8 elements, not the last 8 elements

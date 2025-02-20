@@ -25,7 +25,7 @@ impl IsFirst {
     pub const fn new(log_size: u32) -> Self {
         Self { log_size }
     }
-    
+
     pub fn packed_at(&self, vec_row: usize) -> PackedM31 {
         assert!(vec_row < (1 << self.log_size) / N_LANES);
         if vec_row == 0 {
@@ -42,7 +42,7 @@ impl IsFirst {
             PackedM31::zero()
         }
     }
-    
+
     pub fn gen_column_simd(&self) -> CircleEvaluation<SimdBackend, BaseField, BitReversedOrder> {
         let mut col = Col::<SimdBackend, BaseField>::zeros(1 << self.log_size);
         col.set(0, BaseField::one());

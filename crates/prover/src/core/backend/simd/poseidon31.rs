@@ -67,11 +67,7 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                         PackedM31::from_array(array::from_fn(|k| input[2 * k + 1].0[i]))
                 }
 
-                if columns.is_empty() {
-                    Some(permute_get_rate(packed_input))
-                } else {
-                    Some(permute_get_capacity(packed_input))
-                }
+                Some(permute_get_rate(packed_input))
             } else {
                 None
             };
@@ -85,7 +81,11 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                     for j in 0..min(len, 8) {
                         res[j] = columns[j].data[i];
                     }
-                    Some(permute_get_rate(res))
+                    if hash_tree.is_none() {
+                        Some(permute_get_rate(res))
+                    } else {
+                        Some(permute_get_capacity(res))
+                    }
                 } else {
                     let mut res = [PackedM31::zero(); 16];
                     for j in 0..8 {
@@ -113,7 +113,12 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                         for j in 0..8 {
                             state[j + 8] = digest[j];
                         }
-                        digest = permute_get_rate(state);
+
+                        if hash_tree.is_none() {
+                            digest = permute_get_rate(state);
+                        } else {
+                            digest = permute_get_capacity(state);
+                        }
                     } else {
                         let mut state = [PackedM31::zero(); 16];
                         for j in 0..remain {
@@ -122,7 +127,12 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                         for j in 0..8 {
                             state[j + 8] = digest[j];
                         }
-                        digest = permute_get_rate(state);
+
+                        if hash_tree.is_none() {
+                            digest = permute_get_rate(state);
+                        } else {
+                            digest = permute_get_capacity(state);
+                        }
                     }
                     Some(digest)
                 }
@@ -134,10 +144,10 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                 (Some(hash_tree), Some(hash_column)) => {
                     let mut state = [PackedM31::zero(); 16];
                     for j in 0..8 {
-                        state[j] = hash_column[j];
+                        state[j] = hash_tree[j];
                     }
                     for j in 0..8 {
-                        state[j + 8] = hash_tree[j];
+                        state[j + 8] = hash_column[j];
                     }
                     permute_get_rate(state)
                 }

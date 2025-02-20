@@ -31,7 +31,7 @@ impl MerkleHasher for Sha256Poseidon31MerkleHasher {
         let hash_column = if column_values.is_empty() {
             None
         } else {
-            Some(Poseidon31MerkleHasher::hash_column(column_values))
+            Some(Poseidon31MerkleHasher::hash_column_get_rate(column_values))
         };
 
         let hash_tree = if let Some(children_hashes) = children_hashes {

@@ -15,7 +15,7 @@ const ELEMENTS_IN_BLOCK: usize = 8;
 pub struct Poseidon31MerkleHasher;
 
 impl Poseidon31MerkleHasher {
-    pub fn hash_column(column_values: &[BaseField]) -> Poseidon31Hash {
+    pub fn hash_column_get_rate(column_values: &[BaseField]) -> Poseidon31Hash {
         assert!(!column_values.is_empty());
 
         let zero = M31::zero();
@@ -61,6 +61,53 @@ impl Poseidon31MerkleHasher {
             Poseidon31Hash(digest)
         }
     }
+
+    pub fn hash_column_get_capacity(column_values: &[BaseField]) -> Poseidon31Hash {
+        assert!(!column_values.is_empty());
+
+        let zero = M31::zero();
+        let len = column_values.len();
+        let num_chunk = len.div_ceil(ELEMENTS_IN_BLOCK);
+
+        if num_chunk == 1 {
+            let mut res = [zero; 16];
+            for i in 0..min(8, len) {
+                res[i] = column_values[i];
+            }
+            Poseidon31Hash(Poseidon31CRH::permute_get_capacity(&res))
+        } else {
+            let mut res = [zero; 16];
+            for i in 0..8 {
+                res[i] = column_values[i];
+            }
+            let mut digest = Poseidon31CRH::permute_get_capacity(&res);
+
+            for chunk in column_values
+                .chunks_exact(ELEMENTS_IN_BLOCK)
+                .skip(1)
+                .take(num_chunk - 2)
+            {
+                let mut state = [zero; 16];
+                state[..8].copy_from_slice(chunk);
+                state[8..16].copy_from_slice(&digest);
+                digest = Poseidon31CRH::permute_get_capacity(&state);
+            }
+
+            let remain = len % ELEMENTS_IN_BLOCK;
+            if remain == 0 {
+                let mut state = [zero; 16];
+                state[..8].copy_from_slice(&column_values[len - 8..]);
+                state[8..16].copy_from_slice(&digest);
+                digest = Poseidon31CRH::permute_get_capacity(&state);
+            } else {
+                let mut state = [zero; 16];
+                state[..remain].copy_from_slice(&column_values[len - remain..]);
+                state[8..16].copy_from_slice(&digest);
+                digest = Poseidon31CRH::permute_get_capacity(&state);
+            }
+            Poseidon31Hash(digest)
+        }
+    }
 }
 
 impl MerkleHasher for Poseidon31MerkleHasher {
@@ -72,33 +119,30 @@ impl MerkleHasher for Poseidon31MerkleHasher {
     ) -> Self::Hash {
         let zero = M31::zero();
 
-        if children_hashes.is_some() && column_values.is_empty() {
+        let hash_tree = if children_hashes.is_some() {
             let (left, right) = children_hashes.unwrap();
             let mut res = [zero; 16];
             for i in 0..ELEMENTS_IN_BLOCK {
                 res[i] = left.0[i];
                 res[i + ELEMENTS_IN_BLOCK] = right.0[i];
             }
-            Poseidon31Hash(Poseidon31CRH::permute_get_rate(&res))
-        } else if children_hashes.is_none() && !column_values.is_empty() {
-            Self::hash_column(column_values)
-        } else if children_hashes.is_none() && column_values.is_empty() {
-            Poseidon31Hash([zero; 8])
+            Some(Poseidon31Hash(Poseidon31CRH::permute_get_rate(&res)))
         } else {
-            let hash_tree = {
-                let (left, right) = children_hashes.unwrap();
-                let mut res = [zero; 16];
-                for i in 0..ELEMENTS_IN_BLOCK {
-                    res[i] = left.0[i];
-                    res[i + ELEMENTS_IN_BLOCK] = right.0[i];
-                }
-                Poseidon31Hash(Poseidon31CRH::permute_get_capacity(&res))
-            };
-            let hash_column = Self::hash_column(column_values);
+            None
+        };
+
+        if hash_tree.is_none() && !column_values.is_empty() {
+            Self::hash_column_get_rate(column_values)
+        } else if hash_tree.is_none() && column_values.is_empty() {
+            Poseidon31Hash([zero; 8])
+        } else if hash_tree.is_some() && column_values.is_empty() {
+            hash_tree.unwrap()
+        } else {
+            let hash_column = Self::hash_column_get_capacity(column_values);
             let mut res = [zero; 16];
             for i in 0..ELEMENTS_IN_BLOCK {
-                res[i] = hash_column.0[i];
-                res[i + ELEMENTS_IN_BLOCK] = hash_tree.0[i];
+                res[i] = hash_tree.unwrap().0[i];
+                res[i + ELEMENTS_IN_BLOCK] = hash_column.0[i];
             }
             Poseidon31Hash(Poseidon31CRH::permute_get_rate(&res))
         }

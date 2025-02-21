@@ -49,10 +49,10 @@ impl PlonkWithPoseidonStatement0 {
         sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 26]);
 
         sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 12]);
-        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 37]);
+        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 33]);
 
         sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_plonk; 8]);
-        sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 4]);
+        sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 8]);
 
         sizes
     }

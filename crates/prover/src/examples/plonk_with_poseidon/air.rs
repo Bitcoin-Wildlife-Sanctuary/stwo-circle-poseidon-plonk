@@ -46,10 +46,10 @@ impl PlonkWithPoseidonStatement0 {
         let log_size_poseidon = self.log_size_poseidon;
 
         sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 10]);
-        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 26]);
+        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 40]);
 
         sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 12]);
-        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 33]);
+        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 48]);
 
         sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_plonk; 8]);
         sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_poseidon; 8]);
@@ -111,29 +111,43 @@ impl PlonkWithPoseidonComponents {
                     Poseidon::new("is_first_round".to_string()).id(),
                     Poseidon::new("is_last_round".to_string()).id(),
                     Poseidon::new("is_full_round".to_string()).id(),
-                    Poseidon::new("is_partial_round".to_string()).id(),
                     Poseidon::new("round_id".to_string()).id(),
-                    Poseidon::new("rc 0".to_string()).id(),
-                    Poseidon::new("rc 1".to_string()).id(),
-                    Poseidon::new("rc 2".to_string()).id(),
-                    Poseidon::new("rc 3".to_string()).id(),
-                    Poseidon::new("rc 4".to_string()).id(),
-                    Poseidon::new("rc 5".to_string()).id(),
-                    Poseidon::new("rc 6".to_string()).id(),
-                    Poseidon::new("rc 7".to_string()).id(),
-                    Poseidon::new("rc 8".to_string()).id(),
-                    Poseidon::new("rc 9".to_string()).id(),
-                    Poseidon::new("rc 10".to_string()).id(),
-                    Poseidon::new("rc 11".to_string()).id(),
-                    Poseidon::new("rc 12".to_string()).id(),
-                    Poseidon::new("rc 13".to_string()).id(),
-                    Poseidon::new("rc 14".to_string()).id(),
-                    Poseidon::new("rc 15".to_string()).id(),
+                    Poseidon::new("rc0 0".to_string()).id(),
+                    Poseidon::new("rc0 1".to_string()).id(),
+                    Poseidon::new("rc0 2".to_string()).id(),
+                    Poseidon::new("rc0 3".to_string()).id(),
+                    Poseidon::new("rc0 4".to_string()).id(),
+                    Poseidon::new("rc0 5".to_string()).id(),
+                    Poseidon::new("rc0 6".to_string()).id(),
+                    Poseidon::new("rc0 7".to_string()).id(),
+                    Poseidon::new("rc0 8".to_string()).id(),
+                    Poseidon::new("rc0 9".to_string()).id(),
+                    Poseidon::new("rc0 10".to_string()).id(),
+                    Poseidon::new("rc0 11".to_string()).id(),
+                    Poseidon::new("rc0 12".to_string()).id(),
+                    Poseidon::new("rc0 13".to_string()).id(),
+                    Poseidon::new("rc0 14".to_string()).id(),
+                    Poseidon::new("rc0 15".to_string()).id(),
+                    Poseidon::new("rc1 0".to_string()).id(),
+                    Poseidon::new("rc1 1".to_string()).id(),
+                    Poseidon::new("rc1 2".to_string()).id(),
+                    Poseidon::new("rc1 3".to_string()).id(),
+                    Poseidon::new("rc1 4".to_string()).id(),
+                    Poseidon::new("rc1 5".to_string()).id(),
+                    Poseidon::new("rc1 6".to_string()).id(),
+                    Poseidon::new("rc1 7".to_string()).id(),
+                    Poseidon::new("rc1 8".to_string()).id(),
+                    Poseidon::new("rc1 9".to_string()).id(),
+                    Poseidon::new("rc1 10".to_string()).id(),
+                    Poseidon::new("rc1 11".to_string()).id(),
+                    Poseidon::new("rc1 12".to_string()).id(),
+                    Poseidon::new("rc1 13".to_string()).id(),
+                    Poseidon::new("rc1 14".to_string()).id(),
+                    Poseidon::new("rc1 15".to_string()).id(),
                     Poseidon::new("external_idx_1".to_string()).id(),
                     Poseidon::new("external_idx_2".to_string()).id(),
                     Poseidon::new("is_external_idx_1_nonzero".to_string()).id(),
                     Poseidon::new("is_external_idx_2_nonzero".to_string()).id(),
-                    Poseidon::new("swap_bit_addr".to_string()).id(),
                 ]
             )
             .collect_vec()[..],
@@ -185,7 +199,7 @@ where
     SimdBackend: BackendForChannel<MC>,
 {
     let log_size_plonk = circuit.mult_c.length.ilog2();
-    let log_size_poseidon = (flow.0.len() * 23).next_power_of_two().ilog2();
+    let log_size_poseidon = (flow.0.len() * 6).next_power_of_two().ilog2();
 
     assert!(log_size_plonk >= LOG_N_LANES);
     assert!(log_size_poseidon >= LOG_N_LANES);

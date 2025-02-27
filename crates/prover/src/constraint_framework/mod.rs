@@ -148,6 +148,17 @@ pub trait EvalAtRow {
         self.write_logup_frac(frac);
     }
 
+    fn add_to_relation_ef<R: Relation<Self::EF, Self::EF>>(
+        &mut self,
+        entry: RelationEntry<'_, Self::EF, Self::EF, R>,
+    ) {
+        let frac = Fraction::new(
+            entry.multiplicity.clone(),
+            entry.relation.combine(entry.values),
+        );
+        self.write_logup_frac(frac);
+    }
+
     // TODO(alont): Remove these once LogupAtRow is no longer used.
     fn write_logup_frac(&mut self, _fraction: Fraction<Self::EF, Self::EF>) {
         unimplemented!()
@@ -252,20 +263,33 @@ macro_rules! logup_proxy {
 pub(crate) use logup_proxy;
 
 pub trait RelationEFTraitBound<F: Clone>:
-    Clone + Zero + From<F> + From<SecureField> + Mul<F, Output = Self> + Sub<Self, Output = Self>
+    Clone
+    + Zero
+    + From<F>
+    + From<SecureField>
+    + Mul<Self, Output = Self>
+    + Mul<F, Output = Self>
+    + Sub<Self, Output = Self>
 {
 }
 
 impl<F, EF> RelationEFTraitBound<F> for EF
 where
     F: Clone,
-    EF: Clone + Zero + From<F> + From<SecureField> + Mul<F, Output = EF> + Sub<EF, Output = EF>,
+    EF: Clone
+        + Zero
+        + From<F>
+        + From<SecureField>
+        + Mul<EF, Output = EF>
+        + Mul<F, Output = EF>
+        + Sub<EF, Output = EF>,
 {
 }
 
 /// A trait for defining a logup relation type.
 pub trait Relation<F: Clone, EF: RelationEFTraitBound<F>>: Sized {
     fn combine(&self, values: &[F]) -> EF;
+    fn combine_ef(&self, values: &[EF]) -> EF;
 
     fn get_name(&self) -> &str;
     fn get_size(&self) -> usize;
@@ -314,6 +338,16 @@ macro_rules! relation {
             $crate::constraint_framework::Relation<F, EF> for $name
         {
             fn combine(&self, values: &[F]) -> EF {
+                values
+                    .iter()
+                    .zip(self.0.alpha_powers)
+                    .fold(EF::zero(), |acc, (value, power)| {
+                        acc + EF::from(power) * value.clone()
+                    })
+                    - self.0.z.into()
+            }
+
+            fn combine_ef(&self, values: &[EF]) -> EF {
                 values
                     .iter()
                     .zip(self.0.alpha_powers)

@@ -10,7 +10,7 @@ use crate::constraint_framework::{
     TraceLocationAllocator,
 };
 use crate::core::backend::simd::column::BaseColumn;
-use crate::core::backend::simd::m31::LOG_N_LANES;
+use crate::core::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
 use crate::core::backend::simd::qm31::PackedSecureField;
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::{BackendForChannel, Column};
@@ -102,48 +102,30 @@ impl FrameworkEval for PlonkWithAcceleratorEval {
                 - E::EF::from(E::F::one() - op) * a_val.clone() * b_val.clone(),
         );
 
-        eval.add_to_relation(RelationEntry::new(
+        eval.add_to_relation_ef(RelationEntry::new(
             &self.lookup_elements,
             mult_a.into(),
-            &[
-                a_wire.clone(),
-                a_val_0.clone(),
-                a_val_1.clone(),
-                a_val_2.clone(),
-                a_val_3.clone(),
-            ],
+            &[a_val.clone(), E::EF::from(a_wire.clone())],
         ));
-        eval.add_to_relation(RelationEntry::new(
+        eval.add_to_relation_ef(RelationEntry::new(
             &self.lookup_elements,
             mult_b.into(),
-            &[
-                b_wire,
-                b_val_0.clone(),
-                b_val_1.clone(),
-                b_val_2.clone(),
-                b_val_3.clone(),
-            ],
+            &[b_val.clone(), E::EF::from(b_wire.clone())],
         ));
 
-        eval.add_to_relation(RelationEntry::new(
+        eval.add_to_relation_ef(RelationEntry::new(
             &self.lookup_elements,
             mult_c.into(),
-            &[c_wire.clone(), c_val_0, c_val_1, c_val_2, c_val_3],
+            &[c_val.clone(), E::EF::from(c_wire.clone())],
         ));
 
-        eval.add_to_relation(RelationEntry::new(
+        eval.add_to_relation_ef(RelationEntry::new(
             &self.lookup_elements,
             (-mult_poseidon).into(),
             &[
-                poseidon_wire.clone(),
-                a_val_0.clone(),
-                a_val_1.clone(),
-                a_val_2.clone(),
-                a_val_3.clone(),
-                b_val_0.clone(),
-                b_val_1.clone(),
-                b_val_2.clone(),
-                b_val_3.clone(),
+                E::EF::from(poseidon_wire.clone()),
+                a_val.clone(),
+                b_val.clone(),
             ],
         ));
 
@@ -215,21 +197,37 @@ pub fn gen_interaction_trace(
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let p0 = circuit.mult_a.data[vec_row];
-        let q0: PackedSecureField = lookup_elements.combine(&[
-            circuit.a_wire.data[vec_row],
-            circuit.a_val_0.data[vec_row],
-            circuit.a_val_1.data[vec_row],
-            circuit.a_val_2.data[vec_row],
-            circuit.a_val_3.data[vec_row],
-        ]);
+        let q0: PackedSecureField = <PlonkWithAcceleratorLookupElements as Relation<
+            PackedBaseField,
+            PackedSecureField,
+        >>::combine_ef(
+            &lookup_elements,
+            &[
+                PackedSecureField::from_packed_m31s([
+                    circuit.a_val_0.data[vec_row],
+                    circuit.a_val_1.data[vec_row],
+                    circuit.a_val_2.data[vec_row],
+                    circuit.a_val_3.data[vec_row],
+                ]),
+                PackedSecureField::from(circuit.a_wire.data[vec_row]),
+            ],
+        );
         let p1 = circuit.mult_b.data[vec_row];
-        let q1: PackedSecureField = lookup_elements.combine(&[
-            circuit.b_wire.data[vec_row],
-            circuit.b_val_0.data[vec_row],
-            circuit.b_val_1.data[vec_row],
-            circuit.b_val_2.data[vec_row],
-            circuit.b_val_3.data[vec_row],
-        ]);
+        let q1: PackedSecureField = <PlonkWithAcceleratorLookupElements as Relation<
+            PackedBaseField,
+            PackedSecureField,
+        >>::combine_ef(
+            &lookup_elements,
+            &[
+                PackedSecureField::from_packed_m31s([
+                    circuit.b_val_0.data[vec_row],
+                    circuit.b_val_1.data[vec_row],
+                    circuit.b_val_2.data[vec_row],
+                    circuit.b_val_3.data[vec_row],
+                ]),
+                PackedSecureField::from(circuit.b_wire.data[vec_row]),
+            ],
+        );
         col_gen.write_frac(vec_row, q0 * p1 + q1 * p0, q0 * q1);
     }
     col_gen.finalize_col();
@@ -237,26 +235,44 @@ pub fn gen_interaction_trace(
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let p0 = circuit.mult_c.data[vec_row];
-        let q0: PackedSecureField = lookup_elements.combine(&[
-            circuit.c_wire.data[vec_row],
-            circuit.c_val_0.data[vec_row],
-            circuit.c_val_1.data[vec_row],
-            circuit.c_val_2.data[vec_row],
-            circuit.c_val_3.data[vec_row],
-        ]);
+        let q0: PackedSecureField = <PlonkWithAcceleratorLookupElements as Relation<
+            PackedBaseField,
+            PackedSecureField,
+        >>::combine_ef(
+            &lookup_elements,
+            &[
+                PackedSecureField::from_packed_m31s([
+                    circuit.c_val_0.data[vec_row],
+                    circuit.c_val_1.data[vec_row],
+                    circuit.c_val_2.data[vec_row],
+                    circuit.c_val_3.data[vec_row],
+                ]),
+                PackedSecureField::from(circuit.c_wire.data[vec_row]),
+            ],
+        );
 
         let p1 = -circuit.mult_poseidon.data[vec_row];
-        let q1: PackedSecureField = lookup_elements.combine(&[
-            circuit.poseidon_wire.data[vec_row],
-            circuit.a_val_0.data[vec_row],
-            circuit.a_val_1.data[vec_row],
-            circuit.a_val_2.data[vec_row],
-            circuit.a_val_3.data[vec_row],
-            circuit.b_val_0.data[vec_row],
-            circuit.b_val_1.data[vec_row],
-            circuit.b_val_2.data[vec_row],
-            circuit.b_val_3.data[vec_row],
-        ]);
+        let q1: PackedSecureField = <PlonkWithAcceleratorLookupElements as Relation<
+            PackedBaseField,
+            PackedSecureField,
+        >>::combine_ef(
+            &lookup_elements,
+            &[
+                PackedSecureField::from(circuit.poseidon_wire.data[vec_row]),
+                PackedSecureField::from_packed_m31s([
+                    circuit.a_val_0.data[vec_row],
+                    circuit.a_val_1.data[vec_row],
+                    circuit.a_val_2.data[vec_row],
+                    circuit.a_val_3.data[vec_row],
+                ]),
+                PackedSecureField::from_packed_m31s([
+                    circuit.b_val_0.data[vec_row],
+                    circuit.b_val_1.data[vec_row],
+                    circuit.b_val_2.data[vec_row],
+                    circuit.b_val_3.data[vec_row],
+                ]),
+            ],
+        );
         col_gen.write_frac(vec_row, q0 * p1 + q1 * p0, q0 * q1);
     }
     col_gen.finalize_col();

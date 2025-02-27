@@ -329,76 +329,100 @@ pub fn eval_poseidon_constraints<E: EvalAtRow>(
     let sel = is_external_idx_1_nonzero.clone() * is_first_round.clone();
     let id = is_first_round.clone() * external_idx_1.clone()
         + is_not_first_round.clone() * in_left_id.clone();
-    eval.add_to_relation(RelationEntry::new(
+    
+    let a = 
+        E::EF::from(in_state[0].clone())
+    + E::EF::from(SecureField::from_u32_unchecked(0, 1, 0, 0)) * in_state[1].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 1, 0)) * in_state[2].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 0, 1)) * in_state[3].clone();
+    let b =
+        E::EF::from(in_state[4].clone())
+            + E::EF::from(SecureField::from_u32_unchecked(0, 1, 0, 0)) * in_state[5].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 1, 0)) * in_state[6].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 0, 1)) * in_state[7].clone();
+    
+    eval.add_to_relation_ef(RelationEntry::new(
         lookup_elements,
         -E::EF::from(is_not_first_round.clone()) + sel,
         &[
-            id,
-            in_state[0].clone(),
-            in_state[1].clone(),
-            in_state[2].clone(),
-            in_state[3].clone(),
-            in_state[4].clone(),
-            in_state[5].clone(),
-            in_state[6].clone(),
-            in_state[7].clone(),
+            E::EF::from(id),
+            a,
+            b,
         ],
     ));
 
     let sel = is_external_idx_2_nonzero.clone() * is_first_round.clone();
     let id = is_first_round.clone() * external_idx_2.clone()
         + is_not_first_round.clone() * in_right_id.clone();
-    eval.add_to_relation(RelationEntry::new(
+    
+    let a =
+        E::EF::from(in_state[8].clone())
+            + E::EF::from(SecureField::from_u32_unchecked(0, 1, 0, 0)) * in_state[9].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 1, 0)) * in_state[10].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 0, 1)) * in_state[11].clone();
+    let b =
+        E::EF::from(in_state[12].clone())
+            + E::EF::from(SecureField::from_u32_unchecked(0, 1, 0, 0)) * in_state[13].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 1, 0)) * in_state[14].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 0, 1)) * in_state[15].clone();
+    
+    eval.add_to_relation_ef(RelationEntry::new(
         lookup_elements,
         -E::EF::from(is_not_first_round.clone()) + sel,
         &[
-            id.clone(),
-            in_state[8].clone(),
-            in_state[9].clone(),
-            in_state[10].clone(),
-            in_state[11].clone(),
-            in_state[12].clone(),
-            in_state[13].clone(),
-            in_state[14].clone(),
-            in_state[15].clone(),
+            E::EF::from(id.clone()),
+            a,
+            b
         ],
     ));
 
     let sel = is_external_idx_1_nonzero.clone() * is_last_round.clone();
     let id = is_last_round.clone() * external_idx_1.clone()
         + is_not_last_round.clone() * out_left_id.clone();
-    eval.add_to_relation(RelationEntry::new(
+
+    let a =
+        E::EF::from(out_state[0].clone())
+            + E::EF::from(SecureField::from_u32_unchecked(0, 1, 0, 0)) * out_state[1].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 1, 0)) * out_state[2].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 0, 1)) * out_state[3].clone();
+    let b =
+        E::EF::from(out_state[4].clone())
+            + E::EF::from(SecureField::from_u32_unchecked(0, 1, 0, 0)) * out_state[5].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 1, 0)) * out_state[6].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 0, 1)) * out_state[7].clone();
+    
+    eval.add_to_relation_ef(RelationEntry::new(
         lookup_elements,
         E::EF::from(is_not_last_round.clone()) + sel.clone(),
         &[
-            id.clone(),
-            out_state[0].clone(),
-            out_state[1].clone(),
-            out_state[2].clone(),
-            out_state[3].clone(),
-            out_state[4].clone(),
-            out_state[5].clone(),
-            out_state[6].clone(),
-            out_state[7].clone(),
+            E::EF::from(id.clone()),
+            a,
+            b,
         ],
     ));
 
     let sel = is_external_idx_2_nonzero.clone() * is_last_round.clone();
     let id = is_last_round.clone() * external_idx_2.clone()
         + is_not_last_round.clone() * out_right_id.clone();
-    eval.add_to_relation(RelationEntry::new(
+
+    let a =
+        E::EF::from(out_state[8].clone())
+            + E::EF::from(SecureField::from_u32_unchecked(0, 1, 0, 0)) * out_state[9].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 1, 0)) * out_state[10].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 0, 1)) * out_state[11].clone();
+    let b =
+        E::EF::from(out_state[12].clone())
+            + E::EF::from(SecureField::from_u32_unchecked(0, 1, 0, 0)) * out_state[13].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 1, 0)) * out_state[14].clone()
+            + E::EF::from(SecureField::from_u32_unchecked(0, 0, 0, 1)) * out_state[15].clone();
+    
+    eval.add_to_relation_ef(RelationEntry::new(
         lookup_elements,
         E::EF::from(is_not_last_round.clone()) + sel.clone(),
         &[
-            id.clone(),
-            out_state[8].clone(),
-            out_state[9].clone(),
-            out_state[10].clone(),
-            out_state[11].clone(),
-            out_state[12].clone(),
-            out_state[13].clone(),
-            out_state[14].clone(),
-            out_state[15].clone(),
+            E::EF::from(id.clone()),
+            a,
+            b
         ],
     ));
 
@@ -1162,22 +1186,40 @@ pub fn gen_interaction_trace(
         let sel = is_external_idx_1_nonzero * is_first_round.clone();
         let id = is_first_round * external_idx_1 + is_not_first_round * in_left_id;
         let num0 = sel - is_not_first_round;
-        let mut denom0_arr = Vec::with_capacity(9);
-        denom0_arr.push(id);
-        for j in 0..8 {
-            denom0_arr.push(trace[j].data[vec_row]);
-        }
-        let denom0: PackedSecureField = lookup_elements.combine(&denom0_arr);
+        let mut denom0_arr = Vec::with_capacity(3);
+        denom0_arr.push(PackedSecureField::from(id));
+        denom0_arr.push(PackedSecureField::from_packed_m31s([
+            trace[0].data[vec_row],
+            trace[1].data[vec_row],
+            trace[2].data[vec_row],
+            trace[3].data[vec_row]
+        ]));
+        denom0_arr.push(PackedSecureField::from_packed_m31s([
+            trace[4].data[vec_row],
+            trace[5].data[vec_row],
+            trace[6].data[vec_row],
+            trace[7].data[vec_row]
+        ]));
+        let denom0: PackedSecureField = <PlonkWithAcceleratorLookupElements as Relation<PackedBaseField, PackedSecureField>>::combine_ef(&lookup_elements, &denom0_arr);
 
         let sel = is_external_idx_2_nonzero * is_first_round.clone();
         let id = is_first_round * external_idx_2 + is_not_first_round * in_right_id;
         let num1 = sel - is_not_first_round;
-        let mut denom1_arr = Vec::with_capacity(9);
-        denom1_arr.push(id);
-        for j in 0..8 {
-            denom1_arr.push(trace[8 + j].data[vec_row]);
-        }
-        let denom1: PackedSecureField = lookup_elements.combine(&denom1_arr);
+        let mut denom1_arr = Vec::with_capacity(3);
+        denom1_arr.push(PackedSecureField::from(id));
+        denom1_arr.push(PackedSecureField::from_packed_m31s([
+            trace[8].data[vec_row],
+            trace[9].data[vec_row],
+            trace[10].data[vec_row],
+            trace[11].data[vec_row]
+        ]));
+        denom1_arr.push(PackedSecureField::from_packed_m31s([
+            trace[12].data[vec_row],
+            trace[13].data[vec_row],
+            trace[14].data[vec_row],
+            trace[15].data[vec_row]
+        ]));
+        let denom1: PackedSecureField = <PlonkWithAcceleratorLookupElements as Relation<PackedBaseField, PackedSecureField>>::combine_ef(&lookup_elements, &denom1_arr);
 
         let mut part1_denom = denom0 * denom1;
         let mut part1_num = denom1 * num0 + denom0 * num1;
@@ -1185,12 +1227,21 @@ pub fn gen_interaction_trace(
         let sel = is_external_idx_1_nonzero.clone() * is_last_round.clone();
         let id = is_last_round * external_idx_1 + is_not_last_round * out_left_id;
         let num0 = sel + is_not_last_round;
-        let mut denom0_arr = Vec::with_capacity(9);
-        denom0_arr.push(id);
-        for j in 0..8 {
-            denom0_arr.push(trace[32 + j].data[vec_row]);
-        }
-        let denom0: PackedSecureField = lookup_elements.combine(&denom0_arr);
+        let mut denom0_arr = Vec::with_capacity(3);
+        denom0_arr.push(PackedSecureField::from(id));
+        denom0_arr.push(PackedSecureField::from_packed_m31s([
+            trace[32].data[vec_row],
+            trace[33].data[vec_row],
+            trace[34].data[vec_row],
+            trace[35].data[vec_row]
+        ]));
+        denom0_arr.push(PackedSecureField::from_packed_m31s([
+            trace[36].data[vec_row],
+            trace[37].data[vec_row],
+            trace[38].data[vec_row],
+            trace[39].data[vec_row]
+        ]));
+        let denom0: PackedSecureField = <PlonkWithAcceleratorLookupElements as Relation<PackedBaseField, PackedSecureField>>::combine_ef(&lookup_elements, &denom0_arr);
 
         col_gen.write_frac(
             vec_row,
@@ -1221,12 +1272,21 @@ pub fn gen_interaction_trace(
         let sel = is_external_idx_2_nonzero.clone() * is_last_round.clone();
         let id = is_last_round * external_idx_2 + is_not_last_round * out_right_id;
         let num0 = sel + is_not_last_round;
-        let mut denom0_arr = Vec::with_capacity(9);
-        denom0_arr.push(id);
-        for j in 0..8 {
-            denom0_arr.push(trace[40 + j].data[vec_row]);
-        }
-        let denom0: PackedSecureField = lookup_elements.combine(&denom0_arr);
+        let mut denom0_arr = Vec::with_capacity(3);
+        denom0_arr.push(PackedSecureField::from(id));
+        denom0_arr.push(PackedSecureField::from_packed_m31s([
+            trace[40].data[vec_row],
+            trace[41].data[vec_row],
+            trace[42].data[vec_row],
+            trace[43].data[vec_row]
+        ]));
+        denom0_arr.push(PackedSecureField::from_packed_m31s([
+            trace[44].data[vec_row],
+            trace[45].data[vec_row],
+            trace[46].data[vec_row],
+            trace[47].data[vec_row]
+        ]));
+        let denom0: PackedSecureField = <PlonkWithAcceleratorLookupElements as Relation<PackedBaseField, PackedSecureField>>::combine_ef(&lookup_elements, &denom0_arr);
 
         let swap_bit_val = trace[16].data[vec_row];
         let num1 = is_first_round * is_not_last_round;

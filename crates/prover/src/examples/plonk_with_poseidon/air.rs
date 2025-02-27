@@ -14,7 +14,7 @@ use crate::core::backend::simd::m31::LOG_N_LANES;
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::BackendForChannel;
 use crate::core::channel::{Channel, MerkleChannel};
-use crate::core::fields::m31::M31;
+use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::fields::FieldExpOps;
 use crate::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, PcsConfig, TreeVec};
@@ -348,7 +348,7 @@ pub fn verify_plonk_with_poseidon<MC: MerkleChannel>(
     let mut input_sum = SecureField::zero();
     for &(i, v) in inputs.iter() {
         let sum: SecureField =
-            lookup_elements.combine(&[M31::from(i), v.0 .0, v.0 .1, v.1 .0, v.1 .1]);
+            <PlonkWithAcceleratorLookupElements as Relation<BaseField, SecureField>>::combine_ef(&lookup_elements, &[v, QM31::from(i)]);
         input_sum += sum.inverse();
     }
 

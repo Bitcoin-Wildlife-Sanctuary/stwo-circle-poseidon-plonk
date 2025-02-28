@@ -27,7 +27,7 @@ use crate::examples::plonk::Plonk;
 use crate::relation;
 
 pub type PlonkWithAcceleratorComponent = FrameworkComponent<PlonkWithAcceleratorEval>;
-relation!(PlonkWithAcceleratorLookupElements, 9);
+relation!(PlonkWithAcceleratorLookupElements, 3);
 
 #[derive(Clone)]
 pub struct PlonkWithAcceleratorEval {

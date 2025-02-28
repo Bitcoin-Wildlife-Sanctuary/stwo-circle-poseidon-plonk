@@ -347,8 +347,10 @@ pub fn verify_plonk_with_poseidon<MC: MerkleChannel>(
 
     let mut input_sum = SecureField::zero();
     for &(i, v) in inputs.iter() {
-        let sum: SecureField =
-            <PlonkWithAcceleratorLookupElements as Relation<BaseField, SecureField>>::combine_ef(&lookup_elements, &[v, QM31::from(i)]);
+        let sum: SecureField = <PlonkWithAcceleratorLookupElements as Relation<
+            BaseField,
+            SecureField,
+        >>::combine_ef(&lookup_elements, &[v, QM31::from(i)]);
         input_sum += sum.inverse();
     }
 

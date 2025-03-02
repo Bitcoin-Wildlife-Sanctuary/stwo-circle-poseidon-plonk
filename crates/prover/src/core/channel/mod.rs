@@ -15,6 +15,9 @@ pub use blake2s::Blake2sChannel;
 mod sha256;
 pub use sha256::Sha256Channel;
 
+mod sha256_poseidon31;
+pub use sha256_poseidon31::Sha256Poseidon31Channel;
+
 pub const EXTENSION_FELTS_PER_HASH: usize = 2;
 
 #[derive(Clone, Default)]

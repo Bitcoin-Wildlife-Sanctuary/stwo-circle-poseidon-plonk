@@ -11,7 +11,9 @@ use super::blake2s::compress16;
 use super::SimdBackend;
 use crate::core::backend::simd::m31::{PackedM31, N_LANES};
 use crate::core::backend::simd::poseidon31::permute;
-use crate::core::channel::{Blake2sChannel, Poseidon31Channel, Sha256Channel};
+use crate::core::channel::{
+    Blake2sChannel, Poseidon31Channel, Sha256Channel, Sha256Poseidon31Channel,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::core::channel::{Channel, Poseidon252Channel};
 use crate::core::fields::m31::M31;
@@ -20,6 +22,12 @@ use crate::core::proof_of_work::GrindOps;
 // Note: GRIND_LOW_BITS is a cap on how much extra time we need to wait for all threads to finish.
 const GRIND_LOW_BITS: u32 = 20;
 const GRIND_HI_BITS: u32 = 64 - GRIND_LOW_BITS;
+
+impl GrindOps<Sha256Poseidon31Channel> for SimdBackend {
+    fn grind(channel: &Sha256Poseidon31Channel, pow_bits: u32) -> u64 {
+        <SimdBackend as GrindOps<Sha256Channel>>::grind(&channel.inner, pow_bits)
+    }
+}
 
 impl GrindOps<Sha256Channel> for SimdBackend {
     fn grind(channel: &Sha256Channel, pow_bits: u32) -> u64 {

@@ -1,7 +1,7 @@
 use blake2::Digest;
 use serde::{Deserialize, Serialize};
 
-use crate::core::channel::{MerkleChannel, Sha256Channel};
+use crate::core::channel::{MerkleChannel, Sha256Poseidon31Channel};
 use crate::core::fields::m31::BaseField;
 use crate::core::vcs::bitcoin_num_to_bytes;
 use crate::core::vcs::ops::MerkleHasher;
@@ -28,12 +28,6 @@ impl MerkleHasher for Sha256Poseidon31MerkleHasher {
         // - H(H(left | right) | [column hash])
         // - [column hash]
 
-        let hash_column = if column_values.is_empty() {
-            None
-        } else {
-            Some(Poseidon31MerkleHasher::hash_column_get_rate(column_values))
-        };
-
         let hash_tree = if let Some(children_hashes) = children_hashes {
             let mut hash = [0u8; 32];
             let mut sha256 = sha2::Sha256::new();
@@ -45,39 +39,59 @@ impl MerkleHasher for Sha256Poseidon31MerkleHasher {
             None
         };
 
-        let hash_result = match (hash_tree, hash_column) {
-            (Some(hash_tree), Some(hash_column)) => {
-                let mut hash = hash_tree;
-
-                for i in 0..8 {
-                    let mut sha256 = sha2::Sha256::new();
-                    Digest::update(&mut sha256, hash);
-                    Digest::update(&mut sha256, bitcoin_num_to_bytes(hash_column.0[i]));
-                    hash.copy_from_slice(sha256.finalize().as_slice());
-                }
-
-                Sha256Hash(hash)
-            }
-            (Some(hash_tree), None) => Sha256Hash(hash_tree),
-            (None, Some(hash_column)) => {
+        if column_values.is_empty() {
+            assert!(hash_tree.is_some(), "hash_node must not be empty");
+            Sha256Hash(hash_tree.unwrap())
+        } else {
+            if column_values.len() <= 8 {
                 let mut hash = [0u8; 32];
-
-                let mut sha256 = sha2::Sha256::new();
-                Digest::update(&mut sha256, bitcoin_num_to_bytes(hash_column.0[0]));
-                hash.copy_from_slice(sha256.finalize().as_slice());
-
-                for i in 1..8 {
+                if hash_tree.is_some() {
                     let mut sha256 = sha2::Sha256::new();
-                    Digest::update(&mut sha256, hash);
-                    Digest::update(&mut sha256, bitcoin_num_to_bytes(hash_column.0[i]));
+                    Digest::update(&mut sha256, hash_tree.unwrap());
+                    Digest::update(&mut sha256, bitcoin_num_to_bytes(column_values[0]));
+                    hash.copy_from_slice(sha256.finalize().as_slice());
+                } else {
+                    let mut sha256 = sha2::Sha256::new();
+                    Digest::update(&mut sha256, bitcoin_num_to_bytes(column_values[0]));
+                    hash.copy_from_slice(sha256.finalize().as_slice());
+                };
+                for i in 1..column_values.len() {
+                    let mut sha256 = sha2::Sha256::new();
+                    Digest::update(&mut sha256, &hash);
+                    Digest::update(&mut sha256, bitcoin_num_to_bytes(column_values[i]));
                     hash.copy_from_slice(sha256.finalize().as_slice());
                 }
+                Sha256Hash(hash)
+            } else {
+                let mut hash = [0u8; 32];
+                let data = Poseidon31MerkleHasher::hash_column_get_rate(column_values);
+                if hash_tree.is_some() {
+                    let mut sha256 = sha2::Sha256::new();
+                    Digest::update(&mut sha256, hash_tree.unwrap());
+                    Digest::update(&mut sha256, bitcoin_num_to_bytes(data.0[0]));
+                    hash.copy_from_slice(sha256.finalize().as_slice());
 
+                    for i in 1..8 {
+                        let mut sha256 = sha2::Sha256::new();
+                        Digest::update(&mut sha256, &hash);
+                        Digest::update(&mut sha256, bitcoin_num_to_bytes(data.0[i]));
+                        hash.copy_from_slice(sha256.finalize().as_slice());
+                    }
+                } else {
+                    let mut sha256 = sha2::Sha256::new();
+                    Digest::update(&mut sha256, bitcoin_num_to_bytes(data.0[0]));
+                    hash.copy_from_slice(sha256.finalize().as_slice());
+
+                    for i in 1..8 {
+                        let mut sha256 = sha2::Sha256::new();
+                        Digest::update(&mut sha256, &hash);
+                        Digest::update(&mut sha256, bitcoin_num_to_bytes(data.0[i]));
+                        hash.copy_from_slice(sha256.finalize().as_slice());
+                    }
+                }
                 Sha256Hash(hash)
             }
-            (None, None) => unreachable!(),
-        };
-        hash_result
+        }
     }
 }
 
@@ -85,7 +99,7 @@ impl MerkleHasher for Sha256Poseidon31MerkleHasher {
 pub struct Sha256Poseidon31MerkleChannel;
 
 impl MerkleChannel for Sha256Poseidon31MerkleChannel {
-    type C = Sha256Channel;
+    type C = Sha256Poseidon31Channel;
     type H = Sha256Poseidon31MerkleHasher;
 
     fn mix_root(channel: &mut Self::C, root: <Self::H as MerkleHasher>::Hash) {
@@ -97,7 +111,7 @@ impl MerkleChannel for Sha256Poseidon31MerkleChannel {
 mod tests {
     use num_traits::Zero;
 
-    use crate::core::channel::{MerkleChannel, Sha256Channel};
+    use crate::core::channel::{MerkleChannel, Sha256Poseidon31Channel};
     use crate::core::fields::m31::BaseField;
     use crate::core::vcs::sha256_hash::Sha256Hash;
     use crate::core::vcs::sha256_poseidon31_merkle::{
@@ -188,10 +202,10 @@ mod tests {
 
     #[test]
     fn test_merkle_channel() {
-        let mut channel = Sha256Channel::default();
+        let mut channel = Sha256Poseidon31Channel::default();
         let (_queries, _decommitment, _values, verifier) =
             prepare_merkle::<Sha256Poseidon31MerkleHasher>();
         Sha256Poseidon31MerkleChannel::mix_root(&mut channel, verifier.root);
-        assert_eq!(channel.channel_time.n_challenges, 1);
+        assert_eq!(channel.inner.channel_time.n_challenges, 1);
     }
 }

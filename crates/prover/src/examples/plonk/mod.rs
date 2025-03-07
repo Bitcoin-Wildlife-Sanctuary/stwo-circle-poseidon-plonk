@@ -58,25 +58,26 @@ impl FrameworkEval for PlonkEval {
         let c_val = eval.next_trace_mask();
 
         eval.add_constraint(
-            c_val.clone() - op.clone() * (a_val.clone() + b_val.clone())
+            c_val.clone()
+                - op.clone() * (a_val.clone() + b_val.clone())
                 - (E::F::one() - op) * a_val.clone() * b_val.clone(),
         );
 
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
             E::EF::one(),
-            &[a_wire, a_val],
+            &[a_val, a_wire],
         ));
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
             E::EF::one(),
-            &[b_wire, b_val],
+            &[b_val, b_wire],
         ));
 
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
             (-mult).into(),
-            &[c_wire, c_val],
+            &[c_val, c_wire],
         ));
 
         eval.finalize_logup_batched(&vec![0, 0, 0]);
@@ -127,16 +128,16 @@ pub fn gen_interaction_trace(
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let q0: PackedSecureField =
-            lookup_elements.combine(&[circuit.a_wire.data[vec_row], circuit.a_val.data[vec_row]]);
+            lookup_elements.combine(&[circuit.a_val.data[vec_row], circuit.a_wire.data[vec_row]]);
         let q1: PackedSecureField =
-            lookup_elements.combine(&[circuit.b_wire.data[vec_row], circuit.b_val.data[vec_row]]);
+            lookup_elements.combine(&[circuit.b_val.data[vec_row], circuit.b_wire.data[vec_row]]);
 
         let pab = q0 + q1;
         let qab = q0 * q1;
 
         let pc = -circuit.mult.data[vec_row];
         let qc: PackedSecureField =
-            lookup_elements.combine(&[circuit.c_wire.data[vec_row], circuit.c_val.data[vec_row]]);
+            lookup_elements.combine(&[circuit.c_val.data[vec_row], circuit.c_wire.data[vec_row]]);
         col_gen.write_frac(vec_row, pab * qc + qab * pc, qab * qc);
     }
     col_gen.finalize_col();

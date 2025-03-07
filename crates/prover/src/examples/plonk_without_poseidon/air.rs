@@ -185,7 +185,7 @@ where
 }
 
 #[allow(unused)]
-pub fn verify_plonk_with_poseidon<MC: MerkleChannel>(
+pub fn verify_plonk_without_poseidon<MC: MerkleChannel>(
     PlonkWithoutPoseidonProof {
         stmt0,
         stmt1,

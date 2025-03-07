@@ -59,7 +59,7 @@ impl FrameworkEval for PlonkEval {
 
         eval.add_constraint(
             c_val.clone() - op.clone() * (a_val.clone() + b_val.clone())
-                + (E::F::one() - op) * a_val.clone() * b_val.clone(),
+                - (E::F::one() - op) * a_val.clone() * b_val.clone(),
         );
 
         eval.add_to_relation(RelationEntry::new(

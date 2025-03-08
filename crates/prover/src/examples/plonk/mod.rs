@@ -76,7 +76,7 @@ impl FrameworkEval for PlonkEval {
 
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
-            (-mult).into(),
+            mult.into(),
             &[c_val, c_wire],
         ));
 
@@ -135,7 +135,7 @@ pub fn gen_interaction_trace(
         let pab = q0 + q1;
         let qab = q0 * q1;
 
-        let pc = -circuit.mult.data[vec_row];
+        let pc = circuit.mult.data[vec_row];
         let qc: PackedSecureField =
             lookup_elements.combine(&[circuit.c_val.data[vec_row], circuit.c_wire.data[vec_row]]);
         col_gen.write_frac(vec_row, pab * qc + qab * pc, qab * qc);

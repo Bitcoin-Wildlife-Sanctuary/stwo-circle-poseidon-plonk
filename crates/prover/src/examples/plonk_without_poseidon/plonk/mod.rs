@@ -61,7 +61,7 @@ impl FrameworkEval for PlonkWithoutAcceleratorEval {
         let one_minus_op4 = E::F::one() - op4.clone();
 
         let is_arith = E::EF::from(one_minus_op3.clone()) * one_minus_op4.clone();
-        let is_pow5_m4 = E::EF::from(op2.clone());
+        let is_pow5 = E::EF::from(op2.clone());
         let is_m4 = E::EF::from(op3.clone()) * one_minus_op4.clone();
         let is_hadamard_product = E::EF::from(one_minus_op3.clone()) * op4.clone();
         let is_grand_sum = E::EF::from(op3.clone()) * op4.clone();
@@ -97,20 +97,24 @@ impl FrameworkEval for PlonkWithoutAcceleratorEval {
             + c_val_3.clone() * SecureField::from_u32_unchecked(0, 0, 0, 1);
 
         eval.add_constraint(
-            (E::EF::from(a_val_0.clone()) * a_val_0.clone() - E::EF::from(b_val_0.clone()))
-                * is_pow5_m4.clone(),
+            (E::EF::from(a_val_0.clone()) * a_val_0.clone() * a_val_0.clone() * a_val_0.clone()
+                - E::EF::from(b_val_0.clone()))
+                * is_pow5.clone(),
         );
         eval.add_constraint(
-            (E::EF::from(a_val_1.clone()) * a_val_1.clone() - E::EF::from(b_val_1.clone()))
-                * is_pow5_m4.clone(),
+            (E::EF::from(a_val_1.clone()) * a_val_1.clone() * a_val_1.clone() * a_val_1.clone()
+                - E::EF::from(b_val_1.clone()))
+                * is_pow5.clone(),
         );
         eval.add_constraint(
-            (E::EF::from(a_val_2.clone()) * a_val_2.clone() - E::EF::from(b_val_2.clone()))
-                * is_pow5_m4.clone(),
+            (E::EF::from(a_val_2.clone()) * a_val_2.clone() * a_val_2.clone() * a_val_2.clone()
+                - E::EF::from(b_val_2.clone()))
+                * is_pow5.clone(),
         );
         eval.add_constraint(
-            (E::EF::from(a_val_3.clone()) * a_val_3.clone() - E::EF::from(b_val_3.clone()))
-                * is_pow5_m4.clone(),
+            (E::EF::from(a_val_3.clone()) * a_val_3.clone() * a_val_3.clone() * a_val_3.clone()
+                - E::EF::from(b_val_3.clone()))
+                * is_pow5.clone(),
         );
 
         #[inline(always)]
@@ -136,17 +140,11 @@ impl FrameworkEval for PlonkWithoutAcceleratorEval {
             [t6, t5, t7, t4]
         }
 
-        let pow5_result = apply_m4([
-            E::EF::from(a_val_0.clone()) * b_val_0.clone() * b_val_0.clone(),
-            E::EF::from(a_val_1.clone()) * b_val_1.clone() * b_val_1.clone(),
-            E::EF::from(a_val_2.clone()) * b_val_2.clone() * b_val_2.clone(),
-            E::EF::from(a_val_3.clone()) * b_val_3.clone() * b_val_3.clone(),
-        ]);
         let m4_result = apply_m4([
-            a_val_0.clone(),
-            a_val_1.clone(),
-            a_val_2.clone(),
-            a_val_3.clone(),
+            E::EF::from(a_val_0.clone()) * b_val_0.clone(),
+            E::EF::from(a_val_1.clone()) * b_val_1.clone(),
+            E::EF::from(a_val_2.clone()) * b_val_2.clone(),
+            E::EF::from(a_val_3.clone()) * b_val_3.clone(),
         ]);
 
         let grand_sum = a_val_0.clone()
@@ -162,16 +160,6 @@ impl FrameworkEval for PlonkWithoutAcceleratorEval {
             c_val.clone()
                 - is_arith * E::EF::from(op1.clone()) * (a_val.clone() + b_val.clone())
                 - E::EF::from(E::F::one() - op1) * a_val.clone() * b_val.clone()
-                - is_pow5_m4.clone() * pow5_result[0].clone()
-                - is_pow5_m4.clone()
-                    * pow5_result[1].clone()
-                    * SecureField::from_u32_unchecked(0, 1, 0, 0)
-                - is_pow5_m4.clone()
-                    * pow5_result[2].clone()
-                    * SecureField::from_u32_unchecked(0, 0, 1, 0)
-                - is_pow5_m4.clone()
-                    * pow5_result[3].clone()
-                    * SecureField::from_u32_unchecked(0, 0, 0, 1)
                 - is_m4.clone() * m4_result[0].clone()
                 - is_m4.clone()
                     * m4_result[1].clone()

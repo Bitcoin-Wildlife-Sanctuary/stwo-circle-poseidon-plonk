@@ -11,8 +11,8 @@ use crate::core::backend::simd::m31::LOG_N_LANES;
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::BackendForChannel;
 use crate::core::channel::{Channel, MerkleChannel};
-use crate::core::fields::m31::M31;
-use crate::core::fields::qm31::SecureField;
+use crate::core::fields::m31::BaseField;
+use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::fields::FieldExpOps;
 use crate::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, PcsConfig, TreeVec};
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
@@ -197,7 +197,7 @@ pub fn verify_plonk_without_poseidon<MC: MerkleChannel>(
         stark_proof,
     }: PlonkWithoutPoseidonProof<MC::H>,
     config: PcsConfig,
-    inputs: &[(usize, M31)],
+    inputs: &[(usize, QM31)],
 ) -> Result<(), VerificationError> {
     let channel = &mut MC::C::default();
     let commitment_scheme = &mut CommitmentSchemeVerifier::<MC>::new(config);
@@ -219,7 +219,10 @@ pub fn verify_plonk_without_poseidon<MC: MerkleChannel>(
 
     let mut input_sum = SecureField::zero();
     for &(i, v) in inputs.iter() {
-        let sum: SecureField = lookup_elements.combine(&[v, M31::from(i)]);
+        let sum: SecureField = <PlonkWithoutAcceleratorLookupElements as Relation<
+            BaseField,
+            SecureField,
+        >>::combine_ef(&lookup_elements, &[v, QM31::from(i)]);
         input_sum += sum.inverse();
     }
 

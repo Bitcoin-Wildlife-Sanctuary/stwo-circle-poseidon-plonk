@@ -35,7 +35,7 @@ impl PlonkWithoutPoseidonStatement0 {
         let mut sizes = TreeVec::new(vec![vec![], vec![], vec![]]);
         let log_size_plonk = self.log_size_plonk;
 
-        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 7]);
+        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 8]);
         sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 12]);
         sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_plonk; 4]);
 
@@ -99,6 +99,7 @@ where
         circuit.op1.clone(),
         circuit.op2.clone(),
         circuit.op3.clone(),
+        circuit.op4.clone(),
         circuit.mult_c.clone(),
     ]
     .into_iter()

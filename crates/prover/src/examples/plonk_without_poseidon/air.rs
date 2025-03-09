@@ -19,10 +19,7 @@ use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
 use crate::core::poly::BitReversedOrder;
 use crate::core::prover::{prove, verify, StarkProof, VerificationError};
 use crate::core::vcs::ops::MerkleHasher;
-use crate::examples::plonk::{
-    gen_interaction_trace, gen_trace, PlonkCircuitTrace, PlonkComponent, PlonkEval,
-    PlonkLookupElements,
-};
+use crate::examples::plonk_without_poseidon::plonk::{gen_interaction_trace, gen_trace, PlonkWithoutAcceleratorCircuitTrace, PlonkWithoutAcceleratorComponent, PlonkWithoutAcceleratorEval, PlonkWithoutAcceleratorLookupElements};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PlonkWithoutPoseidonStatement0 {
@@ -34,8 +31,8 @@ impl PlonkWithoutPoseidonStatement0 {
         let mut sizes = TreeVec::new(vec![vec![], vec![], vec![]]);
         let log_size_plonk = self.log_size_plonk;
 
-        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 4]);
-        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 4]);
+        sizes[PREPROCESSED_TRACE_IDX].extend_from_slice(&[log_size_plonk; 7]);
+        sizes[ORIGINAL_TRACE_IDX].extend_from_slice(&[log_size_plonk; 12]);
         sizes[INTERACTION_TRACE_IDX].extend_from_slice(&[log_size_plonk; 4]);
 
         sizes
@@ -66,15 +63,15 @@ pub struct PlonkWithoutPoseidonProof<H: MerkleHasher> {
 
 pub fn prove_plonk_without_poseidon<MC: MerkleChannel>(
     config: PcsConfig,
-    circuit: &PlonkCircuitTrace,
+    circuit: &PlonkWithoutAcceleratorCircuitTrace,
 ) -> PlonkWithoutPoseidonProof<MC::H>
 where
     SimdBackend: BackendForChannel<MC>,
 {
-    let log_size_plonk = circuit.mult.length.ilog2();
+    let log_size_plonk = circuit.mult_c.length.ilog2();
 
     assert!(log_size_plonk >= LOG_N_LANES);
-    assert_eq!(circuit.mult.length, 1 << log_size_plonk);
+    assert_eq!(circuit.mult_c.length, 1 << log_size_plonk);
 
     // Precompute twiddles.
     let span = span!(Level::INFO, "Precompute twiddles").entered();
@@ -95,7 +92,10 @@ where
         circuit.a_wire.clone(),
         circuit.b_wire.clone(),
         circuit.c_wire.clone(),
-        circuit.op.clone(),
+        circuit.op1.clone(),
+        circuit.op2.clone(),
+        circuit.op3.clone(),
+        circuit.mult_c.clone(),
     ]
     .into_iter()
     .map(|eval| {
@@ -126,12 +126,12 @@ where
     span.exit();
 
     // Draw lookup element.
-    let lookup_elements = PlonkLookupElements::draw(channel);
+    let lookup_elements = PlonkWithoutAcceleratorLookupElements::draw(channel);
 
     // Interaction trace.
     let span = span!(Level::INFO, "Interaction").entered();
     let (plonk_interaction_trace, plonk_total_sum) =
-        gen_interaction_trace(log_size_plonk, &circuit, &lookup_elements.0);
+        gen_interaction_trace(log_size_plonk, &circuit, &lookup_elements);
 
     let mut tree_builder = commitment_scheme.tree_builder();
     tree_builder.extend_evals(plonk_interaction_trace);
@@ -151,12 +151,12 @@ where
     );
 
     // Prove constraints.
-    let component = PlonkComponent::new(
+    let component = PlonkWithoutAcceleratorComponent::new(
         &mut TraceLocationAllocator::default(),
-        PlonkEval {
+        PlonkWithoutAcceleratorEval {
             log_n_rows: log_size_plonk,
             lookup_elements,
-            claimed_sum: plonk_total_sum,
+            total_sum: plonk_total_sum,
         },
         plonk_total_sum,
     );
@@ -206,7 +206,7 @@ pub fn verify_plonk_without_poseidon<MC: MerkleChannel>(
     commitment_scheme.commit(stark_proof.commitments[1], &log_sizes[1], channel);
 
     // Draw interaction elements.
-    let lookup_elements = PlonkLookupElements::draw(channel);
+    let lookup_elements = PlonkWithoutAcceleratorLookupElements::draw(channel);
 
     // Interaction trace.
     stmt1.mix_into(channel);
@@ -221,12 +221,12 @@ pub fn verify_plonk_without_poseidon<MC: MerkleChannel>(
     let total_sum = stmt1.plonk_total_sum + input_sum;
     assert_eq!(total_sum, SecureField::zero());
 
-    let component = PlonkComponent::new(
+    let component = PlonkWithoutAcceleratorComponent::new(
         &mut TraceLocationAllocator::default(),
-        PlonkEval {
+        PlonkWithoutAcceleratorEval {
             log_n_rows: stmt0.log_size_plonk,
             lookup_elements,
-            claimed_sum: stmt1.plonk_total_sum,
+            total_sum: stmt1.plonk_total_sum,
         },
         stmt1.plonk_total_sum,
     );

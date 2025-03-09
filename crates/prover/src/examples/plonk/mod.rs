@@ -16,7 +16,7 @@ use crate::core::backend::Column;
 use crate::core::channel::Blake2sChannel;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
-use crate::core::pcs::{CommitmentSchemeProver, PcsConfig};
+use crate::core::pcs::{CommitmentSchemeProver, PcsConfig, TreeSubspan};
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
 use crate::core::poly::BitReversedOrder;
 use crate::core::prover::{prove, StarkProof};
@@ -33,6 +33,9 @@ pub struct PlonkEval {
     pub log_n_rows: u32,
     pub lookup_elements: PlonkLookupElements,
     pub claimed_sum: SecureField,
+    pub base_trace_location: TreeSubspan,
+    pub interaction_trace_location: TreeSubspan,
+    pub constants_trace_location: TreeSubspan,
 }
 
 impl FrameworkEval for PlonkEval {
@@ -41,7 +44,7 @@ impl FrameworkEval for PlonkEval {
     }
 
     fn max_constraint_log_degree_bound(&self) -> u32 {
-        self.log_n_rows + 2
+        self.log_n_rows + 1
     }
 
     fn evaluate<E: EvalAtRow>(&self, mut eval: E) -> E {
@@ -58,29 +61,28 @@ impl FrameworkEval for PlonkEval {
         let c_val = eval.next_trace_mask();
 
         eval.add_constraint(
-            c_val.clone()
-                - op.clone() * (a_val.clone() + b_val.clone())
-                - (E::F::one() - op) * a_val.clone() * b_val.clone(),
+            c_val.clone() - op.clone() * (a_val.clone() + b_val.clone())
+                + (E::F::one() - op) * a_val.clone() * b_val.clone(),
         );
 
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
             E::EF::one(),
-            &[a_val, a_wire],
+            &[a_wire, a_val],
         ));
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
             E::EF::one(),
-            &[b_val, b_wire],
+            &[b_wire, b_val],
         ));
 
         eval.add_to_relation(RelationEntry::new(
             &self.lookup_elements,
-            mult.into(),
-            &[c_val, c_wire],
+            (-mult).into(),
+            &[c_wire, c_val],
         ));
 
-        eval.finalize_logup_batched(&vec![0, 0, 0]);
+        eval.finalize_logup_in_pairs();
         eval
     }
 }
@@ -109,9 +111,9 @@ pub fn gen_trace(
         &circuit.b_val,
         &circuit.c_val,
     ]
-    .into_iter()
-    .map(|eval| CircleEvaluation::new(domain, eval.clone()))
-    .collect()
+        .into_iter()
+        .map(|eval| CircleEvaluation::new(domain, eval.clone()))
+        .collect()
 }
 
 pub fn gen_interaction_trace(
@@ -128,17 +130,19 @@ pub fn gen_interaction_trace(
     let mut col_gen = logup_gen.new_col();
     for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
         let q0: PackedSecureField =
-            lookup_elements.combine(&[circuit.a_val.data[vec_row], circuit.a_wire.data[vec_row]]);
+            lookup_elements.combine(&[circuit.a_wire.data[vec_row], circuit.a_val.data[vec_row]]);
         let q1: PackedSecureField =
-            lookup_elements.combine(&[circuit.b_val.data[vec_row], circuit.b_wire.data[vec_row]]);
+            lookup_elements.combine(&[circuit.b_wire.data[vec_row], circuit.b_val.data[vec_row]]);
+        col_gen.write_frac(vec_row, q0 + q1, q0 * q1);
+    }
+    col_gen.finalize_col();
 
-        let pab = q0 + q1;
-        let qab = q0 * q1;
-
-        let pc = circuit.mult.data[vec_row];
-        let qc: PackedSecureField =
-            lookup_elements.combine(&[circuit.c_val.data[vec_row], circuit.c_wire.data[vec_row]]);
-        col_gen.write_frac(vec_row, pab * qc + qab * pc, qab * qc);
+    let mut col_gen = logup_gen.new_col();
+    for vec_row in 0..(1 << (log_size - LOG_N_LANES)) {
+        let p = -circuit.mult.data[vec_row];
+        let q: PackedSecureField =
+            lookup_elements.combine(&[circuit.c_wire.data[vec_row], circuit.c_val.data[vec_row]]);
+        col_gen.write_frac(vec_row, p.into(), q);
     }
     col_gen.finalize_col();
 
@@ -174,7 +178,7 @@ pub fn prove_fibonacci_plonk(
     // Precompute twiddles.
     let span = span!(Level::INFO, "Precompute twiddles").entered();
     let twiddles = SimdBackend::precompute_twiddles(
-        CanonicCoset::new(log_n_rows + config.fri_config.log_blowup_factor + 2)
+        CanonicCoset::new(log_n_rows + config.fri_config.log_blowup_factor + 1)
             .circle_domain()
             .half_coset,
     );
@@ -194,15 +198,15 @@ pub fn prove_fibonacci_plonk(
         circuit.c_wire.clone(),
         circuit.op.clone(),
     ]
-    .into_iter()
-    .map(|col| {
-        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
-            CanonicCoset::new(log_n_rows).circle_domain(),
-            col,
-        )
-    })
-    .collect_vec();
-    tree_builder.extend_evals(constant_trace);
+        .into_iter()
+        .map(|col| {
+            CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
+                CanonicCoset::new(log_n_rows).circle_domain(),
+                col,
+            )
+        })
+        .collect_vec();
+    let constants_trace_location = tree_builder.extend_evals(constant_trace);
     tree_builder.commit(channel);
     span.exit();
 
@@ -210,7 +214,7 @@ pub fn prove_fibonacci_plonk(
     let span = span!(Level::INFO, "Trace").entered();
     let trace = gen_trace(log_n_rows, &circuit);
     let mut tree_builder = commitment_scheme.tree_builder();
-    tree_builder.extend_evals(trace);
+    let base_trace_location = tree_builder.extend_evals(trace);
     tree_builder.commit(channel);
     span.exit();
 
@@ -221,7 +225,7 @@ pub fn prove_fibonacci_plonk(
     let span = span!(Level::INFO, "Interaction").entered();
     let (trace, claimed_sum) = gen_interaction_trace(log_n_rows, &circuit, &lookup_elements.0);
     let mut tree_builder = commitment_scheme.tree_builder();
-    tree_builder.extend_evals(trace);
+    let interaction_trace_location = tree_builder.extend_evals(trace);
     tree_builder.commit(channel);
     span.exit();
     // Prove constraints.
@@ -231,6 +235,9 @@ pub fn prove_fibonacci_plonk(
             log_n_rows,
             lookup_elements,
             claimed_sum,
+            base_trace_location,
+            interaction_trace_location,
+            constants_trace_location,
         },
         claimed_sum,
     );

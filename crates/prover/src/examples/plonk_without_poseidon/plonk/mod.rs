@@ -55,10 +55,10 @@ impl FrameworkEval for PlonkWithoutAcceleratorEval {
         let op2 = eval.get_preprocessed_column(Plonk::new("op2".to_string()).id());
         let op3 = eval.get_preprocessed_column(Plonk::new("op3".to_string()).id());
         let mult_c = eval.get_preprocessed_column(Plonk::new("mult_c".to_string()).id());
-        
+
         let one_minus_op2 = E::F::one() - op2.clone();
         let one_minus_op3 = E::F::one() - op3.clone();
-        
+
         let is_arith = E::EF::from(one_minus_op2.clone()) * one_minus_op3.clone();
         let is_pow5_m4 = E::EF::from(op2.clone()) * one_minus_op3.clone();
         let is_hadamard_product = E::EF::from(one_minus_op2.clone()) * op3.clone();
@@ -95,23 +95,31 @@ impl FrameworkEval for PlonkWithoutAcceleratorEval {
             + c_val_3.clone() * SecureField::from_u32_unchecked(0, 0, 0, 1);
 
         eval.add_constraint(
-            is_pow5_m4.clone() * (E::EF::from(a_val_0.clone()) * a_val_0.clone() - E::EF::from(b_val_0.clone()))
+            is_pow5_m4.clone()
+                * (E::EF::from(a_val_0.clone()) * a_val_0.clone() - E::EF::from(b_val_0.clone())),
         );
         eval.add_constraint(
-            is_pow5_m4.clone() * (E::EF::from(a_val_1.clone()) * a_val_1.clone() - E::EF::from(b_val_1.clone()))
+            is_pow5_m4.clone()
+                * (E::EF::from(a_val_1.clone()) * a_val_1.clone() - E::EF::from(b_val_1.clone())),
         );
         eval.add_constraint(
-            is_pow5_m4.clone() * (E::EF::from(a_val_2.clone()) * a_val_2.clone() - E::EF::from(b_val_2.clone()))
+            is_pow5_m4.clone()
+                * (E::EF::from(a_val_2.clone()) * a_val_2.clone() - E::EF::from(b_val_2.clone())),
         );
         eval.add_constraint(
-            is_pow5_m4.clone() * (E::EF::from(a_val_3.clone()) * a_val_3.clone() - E::EF::from(b_val_3.clone()))
+            is_pow5_m4.clone()
+                * (E::EF::from(a_val_3.clone()) * a_val_3.clone() - E::EF::from(b_val_3.clone())),
         );
 
         #[inline(always)]
         /// Applies the M4 MDS matrix described in <https://eprint.iacr.org/2023/323.pdf> 5.1.
         fn apply_m4<F>(x: [F; 4]) -> [F; 4]
         where
-            F: Clone + AddAssign<F> + Add<F, Output = F> + Sub<F, Output = F> + Mul<BaseField, Output = F>,
+            F: Clone
+                + AddAssign<F>
+                + Add<F, Output = F>
+                + Sub<F, Output = F>
+                + Mul<BaseField, Output = F>,
         {
             let t0 = x[0].clone() + x[1].clone();
             let t02 = t0.clone() + t0.clone();
@@ -125,32 +133,48 @@ impl FrameworkEval for PlonkWithoutAcceleratorEval {
             let t7 = t2.clone() + t4.clone();
             [t6, t5, t7, t4]
         }
-        
-        let pow5_result = apply_m4(
-            [
-                E::EF::from(a_val_0.clone()) * b_val_0.clone() * b_val_0.clone(),
-                E::EF::from(a_val_1.clone()) * b_val_1.clone() * b_val_1.clone(),
-                E::EF::from(a_val_2.clone()) * b_val_2.clone() * b_val_2.clone(),
-                E::EF::from(a_val_3.clone()) * b_val_3.clone() * b_val_3.clone(),
-            ]);
-        
-        let grand_sum = 
-            a_val_0.clone() + a_val_1.clone() + a_val_2.clone() + a_val_3.clone()
-            + b_val_0.clone() + b_val_1.clone() + b_val_2.clone() + b_val_3.clone();
-        
+
+        let pow5_result = apply_m4([
+            E::EF::from(a_val_0.clone()) * b_val_0.clone() * b_val_0.clone(),
+            E::EF::from(a_val_1.clone()) * b_val_1.clone() * b_val_1.clone(),
+            E::EF::from(a_val_2.clone()) * b_val_2.clone() * b_val_2.clone(),
+            E::EF::from(a_val_3.clone()) * b_val_3.clone() * b_val_3.clone(),
+        ]);
+
+        let grand_sum = a_val_0.clone()
+            + a_val_1.clone()
+            + a_val_2.clone()
+            + a_val_3.clone()
+            + b_val_0.clone()
+            + b_val_1.clone()
+            + b_val_2.clone()
+            + b_val_3.clone();
+
         eval.add_constraint(
             c_val.clone()
                 - is_arith * E::EF::from(op1.clone()) * (a_val.clone() + b_val.clone())
                 - E::EF::from(E::F::one() - op1) * a_val.clone() * b_val.clone()
                 - is_pow5_m4.clone() * pow5_result[0].clone()
-                - is_pow5_m4.clone() * pow5_result[1].clone() * SecureField::from_u32_unchecked(0, 1, 0, 0)
-                - is_pow5_m4.clone() * pow5_result[2].clone() * SecureField::from_u32_unchecked(0, 0, 1, 0)
-                - is_pow5_m4.clone() * pow5_result[3].clone() * SecureField::from_u32_unchecked(0, 0, 0, 1)
+                - is_pow5_m4.clone()
+                    * pow5_result[1].clone()
+                    * SecureField::from_u32_unchecked(0, 1, 0, 0)
+                - is_pow5_m4.clone()
+                    * pow5_result[2].clone()
+                    * SecureField::from_u32_unchecked(0, 0, 1, 0)
+                - is_pow5_m4.clone()
+                    * pow5_result[3].clone()
+                    * SecureField::from_u32_unchecked(0, 0, 0, 1)
                 - is_hadamard_product.clone() * (a_val_0.clone() * b_val_0.clone())
-                - is_hadamard_product.clone() * (a_val_1.clone() * b_val_1.clone()) * SecureField::from_u32_unchecked(0, 1, 0, 0)
-                - is_hadamard_product.clone() * (a_val_2.clone() * b_val_2.clone()) * SecureField::from_u32_unchecked(0, 0, 1, 0)
-                - is_hadamard_product.clone() * (a_val_3.clone() * b_val_3.clone()) * SecureField::from_u32_unchecked(0, 0, 0, 1)
-                - is_grand_sum.clone() * grand_sum * SecureField::from_u32_unchecked(1, 1, 1, 1)
+                - is_hadamard_product.clone()
+                    * (a_val_1.clone() * b_val_1.clone())
+                    * SecureField::from_u32_unchecked(0, 1, 0, 0)
+                - is_hadamard_product.clone()
+                    * (a_val_2.clone() * b_val_2.clone())
+                    * SecureField::from_u32_unchecked(0, 0, 1, 0)
+                - is_hadamard_product.clone()
+                    * (a_val_3.clone() * b_val_3.clone())
+                    * SecureField::from_u32_unchecked(0, 0, 0, 1)
+                - is_grand_sum.clone() * grand_sum * SecureField::from_u32_unchecked(1, 1, 1, 1),
         );
 
         eval.add_to_relation_ef(RelationEntry::new(
@@ -215,9 +239,9 @@ pub fn gen_trace(
         &circuit.c_val_2,
         &circuit.c_val_3,
     ]
-        .into_iter()
-        .map(|eval| CircleEvaluation::new(CanonicCoset::new(log_size).circle_domain(), eval.clone()))
-        .collect()
+    .into_iter()
+    .map(|eval| CircleEvaluation::new(CanonicCoset::new(log_size).circle_domain(), eval.clone()))
+    .collect()
 }
 
 pub fn gen_interaction_trace(
@@ -263,12 +287,12 @@ pub fn gen_interaction_trace(
                 PackedSecureField::from(circuit.b_wire.data[vec_row]),
             ],
         );
-        
+
         let pab = q0 + q1;
         let qab = q0 * q1;
 
         let pc = circuit.mult_c.data[vec_row];
-        let qc: PackedSecureField =<PlonkWithoutAcceleratorLookupElements as Relation<
+        let qc: PackedSecureField = <PlonkWithoutAcceleratorLookupElements as Relation<
             PackedBaseField,
             PackedSecureField,
         >>::combine_ef(
@@ -283,7 +307,7 @@ pub fn gen_interaction_trace(
                 PackedSecureField::from(circuit.c_wire.data[vec_row]),
             ],
         );
-        
+
         col_gen.write_frac(vec_row, pab * qc + qab * pc, qab * qc);
     }
     col_gen.finalize_col();
@@ -326,14 +350,14 @@ where
         circuit.op3.clone(),
         circuit.mult_c.clone(),
     ]
-        .into_iter()
-        .map(|col| {
-            CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
-                CanonicCoset::new(log_n_rows).circle_domain(),
-                col,
-            )
-        })
-        .collect_vec();
+    .into_iter()
+    .map(|col| {
+        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
+            CanonicCoset::new(log_n_rows).circle_domain(),
+            col,
+        )
+    })
+    .collect_vec();
     tree_builder.extend_evals(constant_trace);
     tree_builder.commit(channel);
     span.exit();
@@ -439,7 +463,9 @@ mod tests {
     use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
     use crate::core::prover::verify;
     use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
-    use crate::examples::plonk_without_poseidon::plonk::{prove_fibonacci_plonk_without_accelerator, PlonkWithoutAcceleratorLookupElements};
+    use crate::examples::plonk_without_poseidon::plonk::{
+        prove_fibonacci_plonk_without_accelerator, PlonkWithoutAcceleratorLookupElements,
+    };
 
     #[test_log::test]
     fn test_simd_plonk_without_accelerator_prove() {

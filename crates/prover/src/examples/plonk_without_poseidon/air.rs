@@ -19,7 +19,11 @@ use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
 use crate::core::poly::BitReversedOrder;
 use crate::core::prover::{prove, verify, StarkProof, VerificationError};
 use crate::core::vcs::ops::MerkleHasher;
-use crate::examples::plonk_without_poseidon::plonk::{gen_interaction_trace, gen_trace, PlonkWithoutAcceleratorCircuitTrace, PlonkWithoutAcceleratorComponent, PlonkWithoutAcceleratorEval, PlonkWithoutAcceleratorLookupElements};
+use crate::examples::plonk_without_poseidon::plonk::{
+    gen_interaction_trace, gen_trace, PlonkWithoutAcceleratorCircuitTrace,
+    PlonkWithoutAcceleratorComponent, PlonkWithoutAcceleratorEval,
+    PlonkWithoutAcceleratorLookupElements,
+};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PlonkWithoutPoseidonStatement0 {

@@ -111,9 +111,9 @@ pub fn gen_trace(
         &circuit.b_val,
         &circuit.c_val,
     ]
-        .into_iter()
-        .map(|eval| CircleEvaluation::new(domain, eval.clone()))
-        .collect()
+    .into_iter()
+    .map(|eval| CircleEvaluation::new(domain, eval.clone()))
+    .collect()
 }
 
 pub fn gen_interaction_trace(
@@ -198,14 +198,14 @@ pub fn prove_fibonacci_plonk(
         circuit.c_wire.clone(),
         circuit.op.clone(),
     ]
-        .into_iter()
-        .map(|col| {
-            CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
-                CanonicCoset::new(log_n_rows).circle_domain(),
-                col,
-            )
-        })
-        .collect_vec();
+    .into_iter()
+    .map(|col| {
+        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
+            CanonicCoset::new(log_n_rows).circle_domain(),
+            col,
+        )
+    })
+    .collect_vec();
     let constants_trace_location = tree_builder.extend_evals(constant_trace);
     tree_builder.commit(channel);
     span.exit();

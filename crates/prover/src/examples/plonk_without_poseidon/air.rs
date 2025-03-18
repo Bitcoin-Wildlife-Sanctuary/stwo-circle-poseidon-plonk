@@ -3,10 +3,7 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use tracing::{span, Level};
 
-use crate::constraint_framework::{
-    assert_constraints, FrameworkEval, Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX,
-    ORIGINAL_TRACE_IDX, PREPROCESSED_TRACE_IDX,
-};
+use crate::constraint_framework::{assert_constraints_on_polys, FrameworkEval, Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX, PREPROCESSED_TRACE_IDX};
 use crate::core::backend::simd::m31::LOG_N_LANES;
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::BackendForChannel;
@@ -171,11 +168,13 @@ where
         .trees
         .as_ref()
         .map(|t| t.polynomials.iter().cloned().collect_vec());
-    assert_constraints(
+    
+    let component_eval = component.clone();
+    assert_constraints_on_polys(
         &trace_polys,
         CanonicCoset::new(log_size_plonk),
-        |eval| {
-            component.evaluate(eval);
+        |assert_eval| {
+            component_eval.evaluate(assert_eval);
         },
         plonk_total_sum,
     );

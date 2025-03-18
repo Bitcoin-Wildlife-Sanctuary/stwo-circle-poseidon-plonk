@@ -13,14 +13,17 @@ permissions:
 
 jobs:
   run-avx-bench:
-    runs-on: avx
+    runs-on: stwo-avx
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/bootstrap_runners
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly-2025-01-02
       - name: Run benchmark
-        run: ./scripts/bench.sh -- --output-format bencher | tee output.txt
+        run: |
+            cargo install cargo-criterion
+            ./scripts/bench.sh |& tee output.txt
       - name: Download previous benchmark data
         uses: actions/cache@v4
         with:

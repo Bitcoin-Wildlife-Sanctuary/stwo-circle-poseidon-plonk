@@ -5,8 +5,8 @@ use tracing::{span, Level};
 use crate::constraint_framework::logup::{LogupTraceGenerator, LookupElements};
 use crate::constraint_framework::preprocessed_columns::PreProcessedColumnId;
 use crate::constraint_framework::{
-    assert_constraints, relation, EvalAtRow, FrameworkComponent, FrameworkEval, RelationEntry,
-    TraceLocationAllocator,
+    assert_constraints_on_polys, relation, EvalAtRow, FrameworkComponent, FrameworkEval,
+    RelationEntry, TraceLocationAllocator,
 };
 use crate::core::backend::simd::column::BaseColumn;
 use crate::core::backend::simd::m31::LOG_N_LANES;
@@ -247,11 +247,12 @@ pub fn prove_fibonacci_plonk(
         .trees
         .as_ref()
         .map(|t| t.polynomials.iter().cloned().collect_vec());
-    assert_constraints(
+    let component_eval = component.clone();
+    assert_constraints_on_polys(
         &trace_polys,
         CanonicCoset::new(log_n_rows),
-        |mut eval| {
-            component.evaluate(eval);
+        |assert_eval| {
+            component_eval.evaluate(assert_eval);
         },
         claimed_sum,
     );

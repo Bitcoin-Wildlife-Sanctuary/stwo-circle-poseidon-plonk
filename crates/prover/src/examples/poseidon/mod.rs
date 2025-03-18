@@ -396,7 +396,7 @@ mod tests {
     use itertools::Itertools;
     use num_traits::One;
 
-    use crate::constraint_framework::assert_constraints;
+    use crate::constraint_framework::assert_constraints_on_polys;
     use crate::core::air::Component;
     use crate::core::backend::simd::SimdBackend;
     use crate::core::backend::BackendForChannel;
@@ -477,7 +477,7 @@ mod tests {
         let traces = TreeVec::new(vec![vec![], trace0, trace1]);
         let trace_polys =
             traces.map(|trace| trace.into_iter().map(|c| c.interpolate()).collect_vec());
-        assert_constraints(
+        assert_constraints_on_polys(
             &trace_polys,
             CanonicCoset::new(LOG_N_ROWS),
             |mut eval| {

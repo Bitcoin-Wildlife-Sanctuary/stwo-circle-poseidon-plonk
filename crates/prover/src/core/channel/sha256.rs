@@ -48,7 +48,7 @@ impl Channel for Sha256Channel {
     fn trailing_zeros(&self) -> u32 {
         let mut bytes = [0u8; 16];
         bytes.copy_from_slice(&self.digest.0[0..16]);
-        u128::from_le_bytes(bytes).trailing_zeros()
+        u128::from_be_bytes(bytes).trailing_zeros()
     }
 
     fn mix_felts(&mut self, felts: &[SecureField]) {

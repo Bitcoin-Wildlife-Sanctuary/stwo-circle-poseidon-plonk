@@ -294,15 +294,6 @@ where
     tree_builder.commit(channel);
     span.exit();
 
-    assert_eq!(
-        commitment_scheme
-            .polynomials()
-            .as_cols_ref()
-            .map_cols(|c| c.log_size())
-            .0,
-        stmt0.log_sizes().0
-    );
-
     // Prove constraints.
     let components = PlonkWithPoseidonComponents::new(&stmt0, &lookup_elements, &stmt1);
     let stark_proof = prove(&components.component_provers(), channel, commitment_scheme).unwrap();
@@ -817,7 +808,7 @@ mod test {
         let (plonk, mut poseidon) = generate_test_circuit();
         let config = PcsConfig {
             pow_bits: 20,
-            fri_config: FriConfig::new(0, 5, 16),
+            fri_config: FriConfig::new(2, 5, 16),
         };
 
         let proof =

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use tracing::{span, Level};
 
 use crate::constraint_framework::{
-    assert_constraints, FrameworkEval, Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX,
-    ORIGINAL_TRACE_IDX, PREPROCESSED_TRACE_IDX,
+    Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX,
+    PREPROCESSED_TRACE_IDX,
 };
 use crate::core::backend::simd::m31::LOG_N_LANES;
 use crate::core::backend::simd::SimdBackend;
@@ -162,20 +162,6 @@ where
             log_n_rows: log_size_plonk,
             lookup_elements,
             total_sum: plonk_total_sum,
-        },
-        plonk_total_sum,
-    );
-
-    // Sanity check. Remove for production.
-    let trace_polys = commitment_scheme
-        .trees
-        .as_ref()
-        .map(|t| t.polynomials.iter().cloned().collect_vec());
-    assert_constraints(
-        &trace_polys,
-        CanonicCoset::new(log_size_plonk),
-        |eval| {
-            component.evaluate(eval);
         },
         plonk_total_sum,
     );

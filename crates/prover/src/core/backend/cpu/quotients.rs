@@ -94,7 +94,8 @@ pub fn column_line_coeffs(
                         point: sample_batch.point,
                         value: *sampled_value,
                     };
-                    complex_conjugate_line_coeffs(&sample, alpha)
+                    let res = complex_conjugate_line_coeffs(&sample, alpha);
+                    res
                 })
                 .collect()
         })

@@ -5,7 +5,10 @@ use num_traits::One;
 use tracing::{span, Level};
 
 use crate::constraint_framework::logup::LogupTraceGenerator;
-use crate::constraint_framework::{assert_constraints_on_polys, EvalAtRow, FrameworkComponent, FrameworkEval, Relation, RelationEntry, TraceLocationAllocator};
+use crate::constraint_framework::{
+    assert_constraints_on_polys, EvalAtRow, FrameworkComponent, FrameworkEval, Relation,
+    RelationEntry, TraceLocationAllocator,
+};
 use crate::core::backend::simd::column::BaseColumn;
 use crate::core::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
 use crate::core::backend::simd::qm31::PackedSecureField;
@@ -361,7 +364,7 @@ where
         .trees
         .as_ref()
         .map(|t| t.polynomials.iter().cloned().collect_vec());
-    
+
     let component_eval = component.clone();
     assert_constraints_on_polys(
         &trace_polys,

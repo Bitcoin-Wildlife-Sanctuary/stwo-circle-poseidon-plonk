@@ -47,8 +47,8 @@ impl MerkleHasher for Sha256Poseidon31MerkleHasher {
                 let mut hash = [0u8; 32];
                 if hash_tree.is_some() {
                     let mut sha256 = sha2::Sha256::new();
-                    Digest::update(&mut sha256, hash_tree.unwrap());
                     Digest::update(&mut sha256, bitcoin_num_to_bytes(column_values[0]));
+                    Digest::update(&mut sha256, hash_tree.unwrap());
                     hash.copy_from_slice(sha256.finalize().as_slice());
                 } else {
                     let mut sha256 = sha2::Sha256::new();
@@ -57,8 +57,8 @@ impl MerkleHasher for Sha256Poseidon31MerkleHasher {
                 };
                 for i in 1..column_values.len() {
                     let mut sha256 = sha2::Sha256::new();
-                    Digest::update(&mut sha256, &hash);
                     Digest::update(&mut sha256, bitcoin_num_to_bytes(column_values[i]));
+                    Digest::update(&mut sha256, &hash);
                     hash.copy_from_slice(sha256.finalize().as_slice());
                 }
                 Sha256Hash(hash)
@@ -67,14 +67,14 @@ impl MerkleHasher for Sha256Poseidon31MerkleHasher {
                 let data = Poseidon31MerkleHasher::hash_column_get_rate(column_values);
                 if hash_tree.is_some() {
                     let mut sha256 = sha2::Sha256::new();
-                    Digest::update(&mut sha256, hash_tree.unwrap());
                     Digest::update(&mut sha256, bitcoin_num_to_bytes(data.0[0]));
+                    Digest::update(&mut sha256, hash_tree.unwrap());
                     hash.copy_from_slice(sha256.finalize().as_slice());
 
                     for i in 1..8 {
                         let mut sha256 = sha2::Sha256::new();
-                        Digest::update(&mut sha256, &hash);
                         Digest::update(&mut sha256, bitcoin_num_to_bytes(data.0[i]));
+                        Digest::update(&mut sha256, &hash);
                         hash.copy_from_slice(sha256.finalize().as_slice());
                     }
                 } else {
@@ -84,8 +84,8 @@ impl MerkleHasher for Sha256Poseidon31MerkleHasher {
 
                     for i in 1..8 {
                         let mut sha256 = sha2::Sha256::new();
-                        Digest::update(&mut sha256, &hash);
                         Digest::update(&mut sha256, bitcoin_num_to_bytes(data.0[i]));
+                        Digest::update(&mut sha256, &hash);
                         hash.copy_from_slice(sha256.finalize().as_slice());
                     }
                 }

@@ -301,9 +301,9 @@ pub trait Relation<F: Clone, EF: RelationEFTraitBound<F>>: Sized {
 ///     signifies a "yield".
 /// `values` are elements in the base field that are entered into the relation.
 pub struct RelationEntry<'a, F: Clone, EF: RelationEFTraitBound<F>, R: Relation<F, EF>> {
-    relation: &'a R,
-    multiplicity: EF,
-    values: &'a [F],
+    pub relation: &'a R,
+    pub multiplicity: EF,
+    pub values: &'a [F],
 }
 impl<'a, F: Clone, EF: RelationEFTraitBound<F>, R: Relation<F, EF>> RelationEntry<'a, F, EF, R> {
     pub const fn new(relation: &'a R, multiplicity: EF, values: &'a [F]) -> Self {

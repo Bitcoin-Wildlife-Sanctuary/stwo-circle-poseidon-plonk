@@ -84,9 +84,8 @@ mod tests {
         let queries = Queries::generate(channel, log_query_size, n_queries);
 
         assert!(queries.len() == n_queries);
-        for query in queries.iter() {
-            assert!(*query < 1 << log_query_size);
-        }
+        assert!(queries.iter().is_sorted());
+        assert!(*queries.positions.last().unwrap() < 1 << log_query_size);
     }
 
     #[test]
@@ -112,7 +111,7 @@ mod tests {
         let folded_queries = queries.fold(n_folds);
         let repeated_folded_queries = folded_queries
             .iter()
-            .flat_map(|q| std::iter::repeat(q).take(ratio));
+            .flat_map(|q| std::iter::repeat_n(q, ratio));
         for (query, folded_query) in queries.iter().zip(repeated_folded_queries) {
             // Check only the x coordinate since folding might give you the conjugate point.
             assert_eq!(

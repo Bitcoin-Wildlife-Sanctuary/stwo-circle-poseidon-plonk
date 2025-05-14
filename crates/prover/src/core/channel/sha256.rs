@@ -10,7 +10,7 @@ use crate::core::vcs::sha256_hash::{Sha256Hash, Sha256Hasher};
 pub const FELTS_PER_HASH: usize = 8;
 
 /// A channel that can be used to draw random elements from a SHA256 hash.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Sha256Channel {
     digest: Sha256Hash,
     pub channel_time: ChannelTime,
@@ -61,9 +61,17 @@ impl Channel for Sha256Channel {
     }
 
     fn mix_u64(&mut self, value: u64) {
-        let mut hash = [0u8; 32];
-        hash[..8].copy_from_slice(&value.to_le_bytes());
-        self.digest = Sha256Hasher::concat_and_hash(&Sha256Hash(hash), &self.digest);
+        self.mix_u32s(&[value as u32, (value >> 32) as u32]);
+    }
+
+    fn mix_u32s(&mut self, data: &[u32]) {
+        for chunk in data.chunks(8) {
+            let mut hash = [0u8; 32];
+            for i in 0..chunk.len() {
+                hash[i * 4..(i + 1) * 4].copy_from_slice(&chunk[i].to_le_bytes());
+            }
+            self.digest = Sha256Hasher::concat_and_hash(&Sha256Hash(hash), &self.digest);
+        }
     }
 
     fn draw_felt(&mut self) -> SecureField {

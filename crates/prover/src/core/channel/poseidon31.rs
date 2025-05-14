@@ -12,7 +12,7 @@ pub const POSEIDON31_BYTES_PER_HASH: usize = 32;
 pub const FELTS_PER_HASH: usize = 8;
 
 /// A channel that can be used to draw random elements from a Poseidon31 hash.
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Poseidon31Channel {
     digest: [M31; 8],
     pub channel_time: ChannelTime,
@@ -144,6 +144,12 @@ impl Channel for Poseidon31Channel {
 
         let new_digest = state.last_chunk::<8>().unwrap();
         self.update_digest(*new_digest);
+    }
+
+    fn mix_u32s(&mut self, data: &[u32]) {
+        for i in data {
+            self.mix_u64(*i as u64);
+        }
     }
 
     fn draw_felt(&mut self) -> SecureField {

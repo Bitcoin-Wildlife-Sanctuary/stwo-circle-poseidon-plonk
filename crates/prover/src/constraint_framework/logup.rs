@@ -1,23 +1,25 @@
 use std::ops::{Mul, Sub};
 
-use itertools::Itertools;
+use itertools::{multizip, Itertools};
 use num_traits::{One, Zero};
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 use super::EvalAtRow;
 use crate::core::backend::simd::column::SecureColumn;
 use crate::core::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
 use crate::core::backend::simd::prefix_sum::inclusive_prefix_sum;
-use crate::core::backend::simd::qm31::PackedSecureField;
+use crate::core::backend::simd::qm31::{batch_inverse_packed_qm31, PackedSecureField};
 use crate::core::backend::simd::SimdBackend;
 use crate::core::backend::Column;
 use crate::core::channel::Channel;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
-use crate::core::fields::secure_column::SecureColumnByCoords;
-use crate::core::fields::FieldExpOps;
+use crate::core::fields::secure_column::{SecureColumnByCoords, SECURE_EXTENSION_DEGREE};
 use crate::core::lookups::utils::Fraction;
 use crate::core::poly::circle::{CanonicCoset, CircleEvaluation};
 use crate::core::poly::BitReversedOrder;
+use crate::core::utils::uninit_vec;
 use crate::core::ColumnVec;
 
 /// Evaluates constraints for batched logups.
@@ -110,7 +112,7 @@ impl<const N: usize> LookupElements<N> {
 
     pub fn dummy() -> Self {
         Self {
-            z: SecureField::one(),
+            z: SecureField::from_u32_unchecked(1, 2, 3, 4),
             alpha: SecureField::one(),
             alpha_powers: [SecureField::one(); N],
         }
@@ -124,15 +126,33 @@ pub struct LogupTraceGenerator {
     trace: Vec<SecureColumnByCoords<SimdBackend>>,
     /// Denominator expressions (z + sum_i alpha^i * x_i) being generated for the current lookup.
     denom: SecureColumn,
+    batch_inverse_buffer: Vec<PackedSecureField>,
 }
 impl LogupTraceGenerator {
     pub fn new(log_size: u32) -> Self {
         let trace = vec![];
         let denom = SecureColumn::zeros(1 << log_size);
+        let batch_inverse_buffer = unsafe { uninit_vec(1 << (log_size - LOG_N_LANES)) };
         Self {
             log_size,
             trace,
             denom,
+            batch_inverse_buffer,
+        }
+    }
+
+    /// # Safety
+    ///
+    /// Calling `finalize_last` on uninitialized LogupTraceGenerator leads to undefined behavior.
+    pub unsafe fn uninitialized(log_size: u32) -> Self {
+        let trace = vec![];
+        let denom = SecureColumn::uninitialized(1 << log_size);
+        let batch_inverse_buffer = unsafe { uninit_vec(1 << (log_size - LOG_N_LANES)) };
+        Self {
+            log_size,
+            trace,
+            denom,
+            batch_inverse_buffer,
         }
     }
 
@@ -142,6 +162,17 @@ impl LogupTraceGenerator {
         LogupColGenerator {
             gen: self,
             numerator: SecureColumnByCoords::<SimdBackend>::zeros(1 << log_size),
+        }
+    }
+
+    /// # Safety
+    ///
+    /// Calling `new_col` on uninitialized LogupTraceGenerator leads to undefined behavior.
+    pub unsafe fn uninitialized_new_col(&mut self) -> LogupColGenerator<'_> {
+        let log_size = self.log_size;
+        LogupColGenerator {
+            gen: self,
+            numerator: SecureColumnByCoords::uninitialized(1 << log_size),
         }
     }
 
@@ -217,33 +248,104 @@ impl LogupColGenerator<'_> {
 
     /// Finalizes generating the column.
     pub fn finalize_col(mut self) {
-        let denom_inv = PackedSecureField::batch_inverse(&self.gen.denom.data);
+        // Column size is a power of 2.
+        let chunk_size = std::cmp::min(4, self.gen.denom.data.len());
+        batch_inverse_packed_qm31(&self.gen.denom.data, &mut self.gen.batch_inverse_buffer);
 
-        #[allow(clippy::needless_range_loop)]
-        for vec_row in 0..(1 << (self.gen.log_size - LOG_N_LANES)) {
-            unsafe {
-                let value = self.numerator.packed_at(vec_row) * denom_inv[vec_row];
-                let prev_value = self
-                    .gen
-                    .trace
-                    .last()
-                    .map(|col| col.packed_at(vec_row))
-                    .unwrap_or_else(PackedSecureField::zero);
-                self.numerator.set_packed(vec_row, value + prev_value)
-            };
-        }
+        #[cfg(feature = "parallel")]
+        let chunks_iter = {
+            let denom_inv_chunks = self.gen.batch_inverse_buffer.par_chunks(chunk_size);
+            let numerator_chunks = self.numerator.par_chunks_mut(chunk_size);
+            (numerator_chunks, denom_inv_chunks).into_par_iter()
+        };
+
+        #[cfg(not(feature = "parallel"))]
+        let chunks_iter = {
+            let denom_inv_chunks = self.gen.batch_inverse_buffer.chunks(chunk_size);
+            let numerator_chunks = self.numerator.chunks_mut(chunk_size);
+            numerator_chunks.zip(denom_inv_chunks)
+        };
+
+        chunks_iter
+            .enumerate()
+            .for_each(|(chunk_idx, (mut numerator_chunk, denom_inv_chunk))| {
+                #[allow(clippy::needless_range_loop)]
+                for idx_in_chunk in 0..chunk_size {
+                    unsafe {
+                        let vec_row = chunk_idx * chunk_size + idx_in_chunk;
+                        let value =
+                            numerator_chunk.packed_at(idx_in_chunk) * denom_inv_chunk[idx_in_chunk];
+                        let prev_value = self
+                            .gen
+                            .trace
+                            .last()
+                            .map(|col| col.packed_at(vec_row))
+                            .unwrap_or_else(PackedSecureField::zero);
+                        numerator_chunk.set_packed(idx_in_chunk, value + prev_value)
+                    }
+                }
+            });
 
         self.gen.trace.push(self.numerator)
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = FractionWriter<'_>> {
+        let denom = self.gen.denom.data.iter_mut();
+        let [coord0, coord1, coord2, coord3] =
+            self.numerator.columns.each_mut().map(|s| &mut s.data);
+        multizip((coord0, coord1, coord2, coord3, denom)).map(|(n0, n1, n2, n3, d)| {
+            FractionWriter {
+                numerator: [n0, n1, n2, n3],
+                denom: d,
+            }
+        })
+    }
+
+    #[cfg(feature = "parallel")]
+    pub fn par_iter_mut(&mut self) -> impl IndexedParallelIterator<Item = FractionWriter<'_>> {
+        let [coord0, coord1, coord2, coord3] =
+            self.numerator.columns.each_mut().map(|s| &mut s.data);
+        (coord0, coord1, coord2, coord3, &mut self.gen.denom.data)
+            .into_par_iter()
+            .map(|(n0, n1, n2, n3, d)| FractionWriter {
+                numerator: [n0, n1, n2, n3],
+                denom: d,
+            })
+    }
+}
+
+/// Exposes a writer for writing a fraction to a single index in a column.
+// TODO(Ohad): iterate in chunks, consider VeryPacked.
+pub struct FractionWriter<'a> {
+    numerator: [&'a mut PackedBaseField; SECURE_EXTENSION_DEGREE],
+    denom: &'a mut PackedSecureField,
+}
+impl FractionWriter<'_> {
+    pub fn write_frac(self, numerator: PackedSecureField, denom: PackedSecureField) {
+        debug_assert!(
+            denom.to_array().iter().all(|x| *x != SecureField::zero()),
+            "denom is zero {:?}",
+            denom
+        );
+        let [c0, c1, c2, c3] = numerator.into_packed_m31s();
+        *self.numerator[0] = c0;
+        *self.numerator[1] = c1;
+        *self.numerator[2] = c2;
+        *self.numerator[3] = c3;
+        *self.denom = denom;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::LookupElements;
+    use crate::constraint_framework::logup::LogupTraceGenerator;
+    use crate::core::backend::simd::qm31::PackedSecureField;
     use crate::core::channel::Blake2sChannel;
     use crate::core::fields::m31::BaseField;
     use crate::core::fields::qm31::SecureField;
     use crate::core::fields::FieldExpOps;
+    use crate::{m31, qm31};
 
     #[test]
     fn test_lookup_elements_combine() {
@@ -262,5 +364,58 @@ mod tests {
                 + BaseField::from_u32_unchecked(789) * lookup_elements.alpha.pow(2)
                 - lookup_elements.z
         );
+    }
+
+    #[test]
+    fn test_frac_writer() {
+        let expected_sum = (qm31!(1, 2, 3, 4) * qm31!(5, 6, 7, 8).inverse()) * m31!(1 << 6);
+
+        let mut log_gen = LogupTraceGenerator::new(6);
+        let mut col_gen = log_gen.new_col();
+        for writer in col_gen.iter_mut() {
+            let num = PackedSecureField::broadcast(qm31!(1, 2, 3, 4));
+            let den = PackedSecureField::broadcast(qm31!(5, 6, 7, 8));
+            writer.write_frac(num, den);
+        }
+
+        col_gen.finalize_col();
+        let (_, sum) = log_gen.finalize_last();
+        assert_eq!(sum, expected_sum);
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn test_parallel_frac_writer() {
+        use std::array;
+
+        use rayon::prelude::*;
+        // Sequential version.
+        let mut log_gen_seq = LogupTraceGenerator::new(6);
+        let mut col_gen_seq = log_gen_seq.new_col();
+        col_gen_seq.iter_mut().enumerate().for_each(|(i, writer)| {
+            let num = array::from_fn(|j| qm31!(i as u32, j as u32, 0, 1));
+            let den = array::from_fn(|j| qm31!(i as u32, j as u32, 2, 3));
+            let [num, den] = [num, den].map(PackedSecureField::from_array);
+            writer.write_frac(num, den);
+        });
+        col_gen_seq.finalize_col();
+        let (_, sum_seq) = log_gen_seq.finalize_last();
+
+        // Parallel version.
+        let mut log_gen_par = LogupTraceGenerator::new(6);
+        let mut col_gen_par = log_gen_par.new_col();
+        col_gen_par
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, writer)| {
+                let num = array::from_fn(|j| qm31!(i as u32, j as u32, 0, 1));
+                let den = array::from_fn(|j| qm31!(i as u32, j as u32, 2, 3));
+                let [num, den] = [num, den].map(PackedSecureField::from_array);
+                writer.write_frac(num, den);
+            });
+        col_gen_par.finalize_col();
+        let (_, sum_par) = log_gen_par.finalize_last();
+
+        assert_eq!(sum_seq, sum_par);
     }
 }

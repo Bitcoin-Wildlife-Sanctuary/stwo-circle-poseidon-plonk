@@ -1,5 +1,6 @@
 use std::array;
 use std::cell::{RefCell, RefMut};
+use std::collections::HashMap;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub};
 use std::rc::Rc;
 
@@ -7,7 +8,7 @@ use num_traits::{One, Zero};
 
 use super::logup::LogupAtRow;
 use super::preprocessed_columns::PreProcessedColumnId;
-use super::{EvalAtRow, INTERACTION_TRACE_IDX};
+use super::{EvalAtRow, Relation, RelationEntry, INTERACTION_TRACE_IDX};
 use crate::constraint_framework::PREPROCESSED_TRACE_IDX;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
@@ -25,6 +26,7 @@ pub struct InfoEvaluator {
     pub preprocessed_columns: Vec<PreProcessedColumnId>,
     pub logup: LogupAtRow<Self>,
     pub arithmetic_counts: ArithmeticCounts,
+    pub logup_counts: LogupCountPerRow,
 }
 impl InfoEvaluator {
     pub fn new(
@@ -38,6 +40,7 @@ impl InfoEvaluator {
             preprocessed_columns,
             logup: LogupAtRow::new(INTERACTION_TRACE_IDX, claimed_sum, log_size),
             arithmetic_counts: Default::default(),
+            logup_counts: LogupCountPerRow::new(),
         }
     }
 
@@ -91,6 +94,18 @@ impl EvalAtRow for InfoEvaluator {
         res
     }
 
+    fn add_to_relation<R: Relation<Self::F, Self::EF>>(
+        &mut self,
+        entry: RelationEntry<'_, Self::F, Self::EF, R>,
+    ) {
+        self.logup_counts.inc(entry.relation.get_name());
+        let frac = Fraction::new(
+            entry.multiplicity.clone(),
+            entry.relation.combine(entry.values),
+        );
+        self.write_logup_frac(frac);
+    }
+
     super::logup_proxy!();
 }
 
@@ -120,7 +135,7 @@ pub struct ArithmeticCounts {
 }
 
 impl ArithmeticCounts {
-    fn merge(&mut self, other: ArithmeticCounts) {
+    const fn merge(&mut self, other: ArithmeticCounts) {
         let Self {
             n_ef_mul_ef,
             n_ef_mul_f,
@@ -382,14 +397,36 @@ impl<const IS_EXT_FIELD: bool> FieldExpOps for ArithmeticCounter<IS_EXT_FIELD> {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct LogupCountPerRow {
+    data: HashMap<String, usize>,
+}
+impl LogupCountPerRow {
+    pub fn new() -> Self {
+        Self {
+            data: HashMap::new(),
+        }
+    }
+
+    pub fn inc(&mut self, relation: &str) {
+        *self.data.entry(relation.to_string()).or_insert(0) += 1;
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &usize)> {
+        self.data.iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use num_traits::{One, Zero};
 
-    use super::ExtensionFieldCounter;
+    use super::{ExtensionFieldCounter, InfoEvaluator};
     use crate::constraint_framework::info::{ArithmeticCounts, FieldCounter};
+    use crate::constraint_framework::{EvalAtRow, FrameworkEval, RelationEntry};
     use crate::core::fields::m31::BaseField;
     use crate::core::fields::qm31::SecureField;
+    use crate::relation;
 
     #[test]
     fn test_arithmetic_counter() {
@@ -452,5 +489,55 @@ mod tests {
                 n_f_add_base_field: N_F_ADD_ASSIGN_BASE_FIELD,
             }
         );
+    }
+
+    relation!(TestRelation, 0);
+    relation!(TestRelation2, 1);
+
+    struct TestEval {
+        relation: TestRelation,
+        relation2: TestRelation2,
+    }
+    impl FrameworkEval for TestEval {
+        fn log_size(&self) -> u32 {
+            unimplemented!()
+        }
+
+        fn max_constraint_log_degree_bound(&self) -> u32 {
+            unimplemented!()
+        }
+
+        fn evaluate<E: EvalAtRow>(&self, mut eval: E) -> E {
+            eval.add_to_relation(RelationEntry::new(
+                &self.relation,
+                SecureField::one().into(),
+                &[],
+            ));
+            eval.add_to_relation(RelationEntry::new(
+                &self.relation2,
+                SecureField::one().into(),
+                &[],
+            ));
+            eval.add_to_relation(RelationEntry::new(
+                &self.relation2,
+                SecureField::one().into(),
+                &[],
+            ));
+
+            eval.finalize_logup();
+            eval
+        }
+    }
+
+    #[test]
+    fn test_logup_count_per_row() {
+        let eval = TestEval {
+            relation: TestRelation::dummy(),
+            relation2: TestRelation2::dummy(),
+        };
+        let info = eval.evaluate(InfoEvaluator::empty());
+
+        assert_eq!(info.logup_counts.data["TestRelation"], 1);
+        assert_eq!(info.logup_counts.data["TestRelation2"], 2);
     }
 }

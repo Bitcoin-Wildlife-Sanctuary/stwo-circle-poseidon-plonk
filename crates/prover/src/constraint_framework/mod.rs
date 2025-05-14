@@ -66,7 +66,6 @@ pub trait EvalAtRow {
         + Clone
         + Debug
         + Zero
-        + From<Self::F>
         + Neg<Output = Self::EF>
         + AddAssign
         + Add<BaseField, Output = Self::EF>
@@ -338,13 +337,7 @@ macro_rules! relation {
             $crate::constraint_framework::Relation<F, EF> for $name
         {
             fn combine(&self, values: &[F]) -> EF {
-                values
-                    .iter()
-                    .zip(self.0.alpha_powers)
-                    .fold(EF::zero(), |acc, (value, power)| {
-                        acc + EF::from(power) * value.clone()
-                    })
-                    - self.0.z.into()
+                self.0.combine(values)
             }
 
             fn combine_ef(&self, values: &[EF]) -> EF {

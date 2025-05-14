@@ -50,25 +50,13 @@ pub fn prove_state_machine(
     );
 
     // Setup protocol.
+    config.mix_into(channel);
     let mut commitment_scheme =
         CommitmentSchemeProver::<_, Blake2sMerkleChannel>::new(config, &twiddles);
 
     // Trace.
     let trace_op0 = gen_trace(x_axis_log_rows, initial_state, 0);
     let trace_op1 = gen_trace(y_axis_log_rows, intermediate_state, 1);
-
-    let trace = chain![trace_op0.clone(), trace_op1.clone()].collect_vec();
-
-    let relation_summary = match track_relations {
-        false => None,
-        true => Some(RelationSummary::summarize_relations(
-            &track_state_machine_relations(
-                &TreeVec(vec![&vec![], &trace]),
-                x_axis_log_rows,
-                y_axis_log_rows,
-            ),
-        )),
-    };
 
     // Commitments.
     let mut tree_builder = commitment_scheme.tree_builder();
@@ -128,6 +116,16 @@ pub fn prove_state_machine(
         component0,
         component1,
     };
+
+    let trace = chain![&trace_op0, &trace_op1].collect_vec();
+
+    let relation_summary = match track_relations {
+        false => None,
+        true => Some(RelationSummary::summarize_relations(
+            &track_state_machine_relations(&TreeVec(vec![vec![], trace]), &components),
+        )),
+    };
+
     let stark_proof = prove(&components.component_provers(), channel, commitment_scheme).unwrap();
     let proof = StateMachineProof {
         public_input: [initial_state, final_state],
@@ -143,8 +141,9 @@ pub fn verify_state_machine(
     components: StateMachineComponents,
     proof: StateMachineProof<Blake2sMerkleHasher>,
 ) -> Result<(), VerificationError> {
-    let commitment_scheme =
-        &mut CommitmentSchemeVerifier::<Blake2sMerkleChannel>::new(proof.stark_proof.config);
+    let pcs_config = proof.stark_proof.config;
+    pcs_config.mix_into(channel);
+    let commitment_scheme = &mut CommitmentSchemeVerifier::<Blake2sMerkleChannel>::new(pcs_config);
     // Decommit.
     // Retrieve the expected column sizes in each commitment interaction, from the AIR.
     let sizes = proof.stmt0.log_sizes();
@@ -352,5 +351,24 @@ mod tests {
             .to_string();
 
         assert_eq!(eval.format_constraints(), expected);
+    }
+
+    #[test]
+    fn test_logup_counts() {
+        let log_n_rows = 8;
+        let initial_state = [M31::zero(); STATE_SIZE];
+        let (components, ..) = prove_state_machine(
+            log_n_rows,
+            initial_state,
+            PcsConfig::default(),
+            &mut Blake2sChannel::default(),
+            false,
+        );
+
+        let counts0 = components.component0.logup_counts();
+        let counts1 = components.component1.logup_counts();
+
+        assert_eq!(counts0["StateMachineElements"], (1 << log_n_rows) * 2);
+        assert_eq!(counts1["StateMachineElements"], (1 << (log_n_rows - 1)) * 2);
     }
 }

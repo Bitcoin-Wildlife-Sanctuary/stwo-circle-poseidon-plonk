@@ -5,6 +5,8 @@ use bytemuck::allocation::cast_vec;
 use bytemuck::{cast_slice, cast_slice_mut, Zeroable};
 use itertools::{izip, Itertools};
 use num_traits::Zero;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 use super::cm31::PackedCM31;
 use super::m31::{PackedBaseField, N_LANES};
@@ -51,7 +53,7 @@ impl BaseColumn {
         values.into_iter().collect()
     }
 
-    pub fn from_simd(values: Vec<PackedBaseField>) -> Self {
+    pub const fn from_simd(values: Vec<PackedBaseField>) -> Self {
         Self {
             length: values.len() * N_LANES,
             data: values,
@@ -317,7 +319,7 @@ impl FromIterator<PackedSecureField> for SecureColumn {
 /// A mutable slice of a SecureColumnByCoords.
 pub struct SecureColumnByCoordsMutSlice<'a>(pub [BaseColumnMutSlice<'a>; SECURE_EXTENSION_DEGREE]);
 
-impl SecureColumnByCoordsMutSlice<'_> {
+impl<'a> SecureColumnByCoordsMutSlice<'a> {
     /// # Safety
     ///
     /// `vec_index` must be a valid index.
@@ -343,6 +345,15 @@ impl SecureColumnByCoordsMutSlice<'_> {
         *self.0[1].0.get_unchecked_mut(vec_index) = b;
         *self.0[2].0.get_unchecked_mut(vec_index) = c;
         *self.0[3].0.get_unchecked_mut(vec_index) = d;
+    }
+
+    /// # Safety
+    ///
+    /// all coordinate in `coords` must be have the same length.
+    pub unsafe fn from_coordinates_unchecked<'b: 'a>(
+        coords: [&'b mut [PackedBaseField]; SECURE_EXTENSION_DEGREE],
+    ) -> Self {
+        Self(coords.map(BaseColumnMutSlice))
     }
 }
 
@@ -374,7 +385,7 @@ impl VeryPackedSecureColumnByCoordsMutSlice<'_> {
 }
 
 impl SecureColumnByCoords<SimdBackend> {
-    pub fn packed_len(&self) -> usize {
+    pub const fn packed_len(&self) -> usize {
         self.columns[0].data.len()
     }
 
@@ -419,15 +430,27 @@ impl SecureColumnByCoords<SimdBackend> {
     /// Returns a vector of `SecureColumnByCoordsMutSlice`s, each mutably owning
     /// `SECURE_EXTENSION_DEGREE` slices of `chunk_size` `PackedBaseField`s
     /// (i.e, `chuck_size` * `N_LANES` secure field elements, by coordinates).
-    pub fn chunks_mut(&mut self, chunk_size: usize) -> Vec<SecureColumnByCoordsMutSlice<'_>> {
+    pub fn chunks_mut(
+        &mut self,
+        chunk_size: usize,
+    ) -> impl ExactSizeIterator<Item = SecureColumnByCoordsMutSlice<'_>> {
         let [a, b, c, d] = self
             .columns
-            .get_many_mut([0, 1, 2, 3])
+            .get_disjoint_mut([0, 1, 2, 3])
             .unwrap()
             .map(|x| x.chunks_mut(chunk_size));
-        izip!(a, b, c, d)
+        izip!(a, b, c, d).map(|(a, b, c, d)| SecureColumnByCoordsMutSlice([a, b, c, d]))
+    }
+
+    #[cfg(feature = "parallel")]
+    pub fn par_chunks_mut(
+        &mut self,
+        chunk_size: usize,
+    ) -> impl IndexedParallelIterator<Item = SecureColumnByCoordsMutSlice<'_>> {
+        let [a, b, c, d] = self.columns.each_mut().map(|c| c.chunks_mut(chunk_size));
+        (a, b, c, d)
+            .into_par_iter()
             .map(|(a, b, c, d)| SecureColumnByCoordsMutSlice([a, b, c, d]))
-            .collect_vec()
     }
 
     pub fn from_cpu(cpu: SecureColumnByCoords<CpuBackend>) -> Self {
@@ -562,7 +585,7 @@ impl From<VeryPackedSecureColumnByCoords> for SecureColumnByCoords<SimdBackend> 
 }
 
 impl VeryPackedSecureColumnByCoords {
-    pub fn packed_len(&self) -> usize {
+    pub const fn packed_len(&self) -> usize {
         self.columns[0].data.len()
     }
 
@@ -624,7 +647,7 @@ impl VeryPackedSecureColumnByCoords {
     ) -> Vec<VeryPackedSecureColumnByCoordsMutSlice<'_>> {
         let [a, b, c, d] = self
             .columns
-            .get_many_mut([0, 1, 2, 3])
+            .get_disjoint_mut([0, 1, 2, 3])
             .unwrap()
             .map(|x| x.chunks_mut(chunk_size));
         izip!(a, b, c, d)
@@ -698,7 +721,7 @@ mod tests {
         let rand1 = PackedQM31::from_array(rng.gen());
 
         const CHUNK_SIZE: usize = 4;
-        let mut chunks = col.chunks_mut(CHUNK_SIZE);
+        let mut chunks: Vec<_> = col.chunks_mut(CHUNK_SIZE).collect();
         unsafe {
             chunks[2].set_packed(3, rand0);
             chunks[3].set_packed(1, rand1);

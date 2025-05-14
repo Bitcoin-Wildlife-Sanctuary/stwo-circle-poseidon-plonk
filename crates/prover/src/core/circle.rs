@@ -1,4 +1,4 @@
-use std::ops::{Add, Div, Mul, Neg, Sub};
+use std::ops::{Add, Mul, Neg, Sub};
 
 use num_traits::{One, Zero};
 
@@ -7,10 +7,9 @@ use super::fields::qm31::SecureField;
 use super::fields::{ComplexConjugate, Field, FieldExpOps};
 use crate::core::channel::Channel;
 use crate::core::fields::qm31::P4;
-use crate::math::utils::egcd;
 
 /// A point on the complex circle. Treated as an additive group.
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct CirclePoint<F> {
     pub x: F,
     pub y: F,
@@ -126,8 +125,7 @@ impl<F: Zero + Add<Output = F> + FieldExpOps + Sub<Output = F> + Neg<Output = F>
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
-        // TODO(ShaharS): Revert once Rust solves compiler [issue](https://github.com/rust-lang/rust/issues/134457).
-        let x = self.x.clone() * rhs.x.clone() + (-self.y.clone() * rhs.y.clone());
+        let x = self.x.clone() * rhs.x.clone() - self.y.clone() * rhs.y.clone();
         let y = self.x * rhs.y + self.y * rhs.x;
         Self { x, y }
     }
@@ -249,16 +247,6 @@ impl CirclePointIndex {
         assert!(self.0 & 1 == 0);
         Self(self.0 >> 1)
     }
-
-    pub fn try_div(&self, rhs: CirclePointIndex) -> Option<isize> {
-        // Find x s.t. x * rhs.0 = self.0 (mod CIRCLE_ORDER).
-        let (s, _t, g) = egcd(rhs.0 as isize, 1 << M31_CIRCLE_LOG_ORDER);
-        if self.0 as isize % g != 0 {
-            return None;
-        }
-        let res = s * self.0 as isize / g;
-        Some(res)
-    }
 }
 
 impl Add for CirclePointIndex {
@@ -282,14 +270,6 @@ impl Mul<usize> for CirclePointIndex {
 
     fn mul(self, rhs: usize) -> Self::Output {
         Self(self.0.wrapping_mul(rhs)).reduce()
-    }
-}
-
-impl Div for CirclePointIndex {
-    type Output = isize;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        self.try_div(rhs).unwrap()
     }
 }
 
@@ -423,11 +403,6 @@ impl Coset {
             log_size: self.log_size,
         }
     }
-
-    pub fn find(&self, i: CirclePointIndex) -> Option<usize> {
-        let res = (i - self.initial_index).try_div(self.step_size)?;
-        Some(res.rem_euclid(self.size() as isize) as usize)
-    }
 }
 
 impl IntoIterator for Coset {
@@ -463,8 +438,7 @@ impl<T: Add<Output = T> + Copy> Iterator for CosetIterator<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
+    use indexmap::IndexSet;
     use num_traits::{One, Pow};
 
     use super::{CirclePointIndex, Coset};
@@ -498,11 +472,11 @@ mod tests {
     #[test]
     fn test_coset_is_half_coset_with_conjugate() {
         let canonic_coset = CanonicCoset::new(8);
-        let coset_points = BTreeSet::from_iter(canonic_coset.coset().iter());
+        let coset_points: IndexSet<_> = canonic_coset.coset().iter().collect();
 
-        let half_coset_points = BTreeSet::from_iter(canonic_coset.half_coset().iter());
-        let half_coset_conjugate_points =
-            BTreeSet::from_iter(canonic_coset.half_coset().conjugate().iter());
+        let half_coset_points: IndexSet<_> = canonic_coset.half_coset().iter().collect();
+        let half_coset_conjugate_points: IndexSet<_> =
+            canonic_coset.half_coset().conjugate().iter().collect();
 
         assert!((&half_coset_points & &half_coset_conjugate_points).is_empty());
         assert_eq!(

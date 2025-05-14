@@ -8,6 +8,7 @@ use super::m31::{PackedM31, N_LANES};
 use super::PACKED_CM31_BATCH_INVERSE_CHUNK_SIZE;
 use crate::core::fields::cm31::CM31;
 use crate::core::fields::{batch_inverse_chunked, FieldExpOps};
+use crate::core::utils;
 
 /// SIMD implementation of [`CM31`].
 #[derive(Copy, Clone, Debug)]
@@ -15,7 +16,7 @@ pub struct PackedCM31(pub [PackedM31; 2]);
 
 impl PackedCM31 {
     /// Constructs a new instance with all vector elements set to `value`.
-    pub fn broadcast(value: CM31) -> Self {
+    pub const fn broadcast(value: CM31) -> Self {
         Self([PackedM31::broadcast(value.0), PackedM31::broadcast(value.1)])
     }
 
@@ -135,7 +136,9 @@ impl FieldExpOps for PackedCM31 {
     }
 
     fn batch_inverse(column: &[Self]) -> Vec<Self> {
-        batch_inverse_chunked(column, PACKED_CM31_BATCH_INVERSE_CHUNK_SIZE)
+        let mut result = unsafe { utils::uninit_vec(column.len()) };
+        batch_inverse_chunked(column, &mut result, PACKED_CM31_BATCH_INVERSE_CHUNK_SIZE);
+        result
     }
 }
 

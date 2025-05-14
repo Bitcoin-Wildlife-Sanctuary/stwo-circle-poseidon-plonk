@@ -5,7 +5,7 @@ use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleHasher;
 use crate::core::vcs::sha256_hash::Sha256Hash;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Sha256Poseidon31Channel {
     pub(crate) inner: Sha256Channel,
 }
@@ -42,6 +42,10 @@ impl Channel for Sha256Poseidon31Channel {
 
     fn mix_u64(&mut self, value: u64) {
         self.inner.mix_u64(value);
+    }
+
+    fn mix_u32s(&mut self, data: &[u32]) {
+        self.inner.mix_u32s(data);
     }
 
     fn draw_felt(&mut self) -> SecureField {

@@ -6,13 +6,12 @@ use crate::core::fields::qm31::SecureField;
 use crate::core::fields::secure_column::SECURE_EXTENSION_DEGREE;
 use crate::core::fields::IntoSlice;
 use crate::core::vcs::blake2_hash::{Blake2sHash, Blake2sHasher};
-use crate::core::vcs::blake2s_ref::compress;
 
 pub const BLAKE_BYTES_PER_HASH: usize = 32;
 pub const FELTS_PER_HASH: usize = 8;
 
 /// A channel that can be used to draw random elements from a [Blake2sHash] digest.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct Blake2sChannel {
     digest: Blake2sHash,
     pub channel_time: ChannelTime,
@@ -22,7 +21,7 @@ impl Blake2sChannel {
     pub const fn digest(&self) -> Blake2sHash {
         self.digest
     }
-    pub fn update_digest(&mut self, new_digest: Blake2sHash) {
+    pub const fn update_digest(&mut self, new_digest: Blake2sHash) {
         self.digest = new_digest;
         self.channel_time.inc_challenges();
     }
@@ -67,15 +66,18 @@ impl Channel for Blake2sChannel {
         self.update_digest(hasher.finalize());
     }
 
-    fn mix_u64(&mut self, nonce: u64) {
-        let digest: [u32; 8] = unsafe { std::mem::transmute(self.digest) };
-        let mut msg = [0; 16];
-        msg[0] = nonce as u32;
-        msg[1] = (nonce >> 32) as u32;
-        let res = compress(std::array::from_fn(|i| digest[i]), msg, 0, 0, 0, 0);
+    fn mix_u32s(&mut self, data: &[u32]) {
+        let mut hasher = Blake2sHasher::new();
+        hasher.update(self.digest.as_ref());
+        for word in data {
+            hasher.update(&word.to_le_bytes());
+        }
 
-        // TODO(shahars) Channel should always finalize hash.
-        self.update_digest(unsafe { std::mem::transmute::<[u32; 8], Blake2sHash>(res) });
+        self.update_digest(hasher.finalize());
+    }
+
+    fn mix_u64(&mut self, value: u64) {
+        self.mix_u32s(&[value as u32, (value >> 32) as u32])
     }
 
     fn draw_felt(&mut self) -> SecureField {
@@ -181,5 +183,41 @@ mod tests {
         channel.mix_felts(felts.as_slice());
 
         assert_ne!(initial_digest, channel.digest);
+    }
+
+    #[test]
+    pub fn test_mix_u64() {
+        let mut channel = Blake2sChannel::default();
+        channel.mix_u64(0x1111222233334444);
+        let digest_64 = channel.digest;
+
+        let mut channel = Blake2sChannel::default();
+        channel.mix_u32s(&[0x33334444, 0x11112222]);
+
+        assert_eq!(digest_64, channel.digest);
+        let digest_bytes: [u8; 32] = digest_64.into();
+        assert_eq!(
+            digest_bytes,
+            [
+                0xbc, 0x9e, 0x3f, 0xc1, 0xd2, 0x4e, 0x88, 0x97, 0x95, 0x6d, 0x33, 0x59, 0x32, 0x73,
+                0x97, 0x24, 0x9d, 0x6b, 0xca, 0xcd, 0x22, 0x4d, 0x92, 0x74, 0x4, 0xe7, 0xba, 0x4a,
+                0x77, 0xdc, 0x6e, 0xce
+            ]
+        )
+    }
+
+    #[test]
+    pub fn test_mix_u32s() {
+        let mut channel = Blake2sChannel::default();
+        channel.mix_u32s(&[1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        let digest: [u8; 32] = channel.digest.into();
+        assert_eq!(
+            digest,
+            [
+                0x70, 0x91, 0x76, 0x83, 0x57, 0xbb, 0x1b, 0xb3, 0x34, 0x6f, 0xda, 0xb6, 0xb3, 0x57,
+                0xd7, 0xfa, 0x46, 0xb8, 0xfb, 0xe3, 0x2c, 0x2e, 0x43, 0x24, 0xa0, 0xff, 0xc2, 0x94,
+                0xcb, 0xf9, 0xa1, 0xc7
+            ]
+        );
     }
 }

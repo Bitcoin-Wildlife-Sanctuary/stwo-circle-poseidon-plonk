@@ -241,9 +241,7 @@ where
     })
     .collect_vec();
 
-    let poseidon_trace = poseidon::gen_trace(flow);
     let poseidon_constant_trace = poseidon::gen_constant_trace(flow);
-    check_trace(&poseidon_trace, &poseidon_constant_trace, flow.0.len());
 
     // Preprocessed trace.
     let span = span!(Level::INFO, "Constant").entered();
@@ -254,6 +252,9 @@ where
     ]);
     tree_builder.commit(channel);
     span.exit();
+
+    let poseidon_trace = poseidon::gen_trace(flow);
+    check_trace(&poseidon_trace, &poseidon_constant_trace, flow.0.len());
 
     // Trace.
     let span = span!(Level::INFO, "Trace").entered();
@@ -297,6 +298,128 @@ where
     // Prove constraints.
     let components = PlonkWithPoseidonComponents::new(&stmt0, &lookup_elements, &stmt1);
     let stark_proof = prove(&components.component_provers(), channel, commitment_scheme).unwrap();
+
+    PlonkWithPoseidonProof {
+        stmt0,
+        stmt1,
+        stark_proof,
+    }
+}
+
+pub fn prove_plonk_with_poseidon_unchecked<MC: MerkleChannel>(
+    config: PcsConfig,
+    circuit: &PlonkWithAcceleratorCircuitTrace,
+    flow: &mut PoseidonFlow,
+) -> PlonkWithPoseidonProof<MC::H>
+where
+    SimdBackend: BackendForChannel<MC>,
+{
+    let log_size_plonk = circuit.mult_c.length.ilog2();
+    let log_size_poseidon = (flow.0.len() * 6).next_power_of_two().ilog2();
+
+    assert!(log_size_plonk >= LOG_N_LANES);
+    assert!(log_size_poseidon >= LOG_N_LANES);
+    assert_eq!(circuit.mult_c.length, 1 << log_size_plonk);
+
+    // Precompute twiddles.
+    let span = span!(Level::INFO, "Precompute twiddles").entered();
+    let log_max_rows = max(log_size_plonk + 1, log_size_poseidon + 3);
+    let twiddles = SimdBackend::precompute_twiddles(
+        CanonicCoset::new(log_max_rows + config.fri_config.log_blowup_factor)
+            .circle_domain()
+            .half_coset,
+    );
+    span.exit();
+
+    // Setup protocol.
+    let channel = &mut MC::C::default();
+    let mut commitment_scheme = CommitmentSchemeProver::new(config, &twiddles);
+
+    // Preprocessed trace
+    let plonk_constant_trace = [
+        circuit.a_wire.clone(),
+        circuit.b_wire.clone(),
+        circuit.c_wire.clone(),
+        circuit.op.clone(),
+        circuit.mult_a.clone(),
+        circuit.mult_b.clone(),
+        circuit.mult_c.clone(),
+        circuit.poseidon_wire.clone(),
+        circuit.mult_poseidon.clone(),
+        circuit.enforce_c_m31.clone(),
+    ]
+    .into_iter()
+    .map(|eval| {
+        CircleEvaluation::<SimdBackend, _, BitReversedOrder>::new(
+            CanonicCoset::new(log_size_plonk).circle_domain(),
+            eval.clone(),
+        )
+    })
+    .collect_vec();
+
+    let poseidon_constant_trace = poseidon::gen_constant_trace(flow);
+
+    // Preprocessed trace.
+    let span = span!(Level::INFO, "Constant").entered();
+    let mut tree_builder = commitment_scheme.tree_builder();
+    tree_builder.extend_evals(chain![
+        plonk_constant_trace,
+        poseidon_constant_trace.clone(),
+    ]);
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Statement0.
+    let stmt0 = PlonkWithPoseidonStatement0 {
+        log_size_plonk,
+        log_size_poseidon,
+    };
+    stmt0.mix_into(channel);
+
+    let timer = std::time::Instant::now();
+
+    let poseidon_trace = poseidon::gen_trace(flow);
+
+    // Trace.
+    let span = span!(Level::INFO, "Trace").entered();
+    let plonk_trace = plonk::gen_trace(log_size_plonk, &circuit);
+
+    let mut tree_builder = commitment_scheme.tree_builder();
+    tree_builder.extend_evals(chain![plonk_trace, poseidon_trace.clone()]);
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Draw lookup element.
+    let lookup_elements = PlonkWithAcceleratorLookupElements::draw(channel);
+
+    // Interaction trace.
+    let span = span!(Level::INFO, "Interaction").entered();
+    let (plonk_interaction_trace, plonk_total_sum) =
+        plonk::gen_interaction_trace(log_size_plonk, &circuit, &lookup_elements);
+    let (poseidon_interaction_trace, poseidon_total_sum) = poseidon::gen_interaction_trace(
+        &poseidon_trace,
+        &poseidon_constant_trace,
+        &lookup_elements,
+    );
+    let mut tree_builder = commitment_scheme.tree_builder();
+    tree_builder.extend_evals(chain![plonk_interaction_trace, poseidon_interaction_trace]);
+    // Statement1.
+    let stmt1 = PlonkWithPoseidonStatement1 {
+        plonk_total_sum,
+        poseidon_total_sum,
+    };
+    stmt1.mix_into(channel);
+    tree_builder.commit(channel);
+    span.exit();
+
+    // Prove constraints.
+    let components = PlonkWithPoseidonComponents::new(&stmt0, &lookup_elements, &stmt1);
+    let stark_proof = prove(&components.component_provers(), channel, commitment_scheme).unwrap();
+
+    println!(
+        "actual proof generation time = {} seconds",
+        timer.elapsed().as_secs_f64()
+    );
 
     PlonkWithPoseidonProof {
         stmt0,

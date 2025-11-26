@@ -14,7 +14,7 @@ mod poseidon31;
 pub use poseidon31::Poseidon31Channel;
 
 mod blake2s;
-pub use blake2s::Blake2sChannel;
+pub use blake2s::{Blake2sChannel, Blake2sChannelGeneric, Blake2sM31Channel};
 
 mod sha256;
 pub use sha256::Sha256Channel;
@@ -38,8 +38,12 @@ pub trait Channel: Default + Clone + Debug {
     fn draw_secure_felt(&mut self) -> SecureField;
     /// Generates a uniform random vector of SecureField elements.
     fn draw_secure_felts(&mut self, n_felts: usize) -> Vec<SecureField>;
-    /// Returns a vector of random bytes of length `BYTES_PER_HASH`.
-    fn draw_random_bytes(&mut self) -> Vec<u8>;
+    /// Returns a vector of random u32s.
+    ///
+    /// The length of this vector depends on the channel's hash function.
+    /// For blake2s channel, the length of the returned vector is 8
+    /// while for poseidon channel, the length is 7.
+    fn draw_u32s(&mut self) -> Vec<u32>;
 }
 
 pub trait MerkleChannel: Default {

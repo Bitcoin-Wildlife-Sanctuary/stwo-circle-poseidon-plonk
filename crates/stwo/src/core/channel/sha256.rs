@@ -95,7 +95,7 @@ impl Channel for Sha256Channel {
         res
     }
 
-    fn draw_random_bytes(&mut self) -> Vec<u8> {
+    fn draw_u32s(&mut self) -> Vec<u32> {
         let mut hash_input = self.digest.0.to_vec();
 
         // Append counter bytes directly (4 bytes for u32).
@@ -111,7 +111,7 @@ impl Channel for Sha256Channel {
         let extract = hasher.finalize();
         self.n_draws += 1;
 
-        extract.to_vec()
+        extract.chunks_exact(4).map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap())).collect()
     }
 }
 
@@ -166,7 +166,7 @@ mod tests {
 
         assert_eq!(channel.n_draws, 0);
 
-        channel.draw_random_bytes();
+        channel.draw_u32s();
         assert_eq!(channel.n_draws, 1);
 
         channel.draw_secure_felts(9);
@@ -174,13 +174,13 @@ mod tests {
     }
 
     #[test]
-    fn test_draw_random_bytes() {
+    fn test_draw_u32s() {
         let mut channel = Sha256Channel::default();
 
-        let first_random_bytes = channel.draw_random_bytes();
+        let first_random_u32s = channel.draw_u32s();
 
-        // Assert that next random bytes are different.
-        assert_ne!(first_random_bytes, channel.draw_random_bytes());
+        // Assert that next random u32s are different.
+        assert_ne!(first_random_u32s, channel.draw_u32s());
     }
 
     #[test]

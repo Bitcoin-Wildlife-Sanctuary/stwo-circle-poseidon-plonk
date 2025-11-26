@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{Backend, BackendForChannel};
-use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+use crate::core::vcs::blake2_merkle::{Blake2sM31MerkleChannel, Blake2sMerkleChannel};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::core::vcs::poseidon252_merkle::Poseidon252MerkleChannel;
 use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
@@ -39,6 +39,7 @@ pub struct SimdBackend;
 
 impl Backend for SimdBackend {}
 impl BackendForChannel<Blake2sMerkleChannel> for SimdBackend {}
+impl BackendForChannel<Blake2sM31MerkleChannel> for SimdBackend {}
 #[cfg(not(target_arch = "wasm32"))]
 impl BackendForChannel<Poseidon252MerkleChannel> for SimdBackend {}
 impl BackendForChannel<Poseidon31MerkleChannel> for SimdBackend {}

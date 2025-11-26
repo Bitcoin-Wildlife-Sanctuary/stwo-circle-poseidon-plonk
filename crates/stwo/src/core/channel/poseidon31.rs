@@ -195,19 +195,9 @@ impl Channel for Poseidon31Channel {
         secure_felts.take(n_felts).collect()
     }
 
-    fn draw_random_bytes(&mut self) -> Vec<u8> {
-        // the implementation here is based on the assumption that the only place draw_random_bytes
-        // will be used is in generating the queries, where only the lowest n bits of every 4 bytes
-        // slice would be used.
-
+    fn draw_u32s(&mut self) -> Vec<u32> {
         let felts: [BaseField; FELTS_PER_HASH] = self.draw_base_felts();
-        let mut bytes = Vec::with_capacity(FELTS_PER_HASH * 4);
-        for i in 0..FELTS_PER_HASH {
-            // important: only le bytes
-            bytes.extend(felts[i].0.to_le_bytes());
-        }
-
-        bytes
+        felts.iter().map(|f| f.0).collect()
     }
 }
 
@@ -225,7 +215,7 @@ mod tests {
 
         assert_eq!(channel.n_draws, 0);
 
-        channel.draw_random_bytes();
+        channel.draw_u32s();
         assert_eq!(channel.n_draws, 1);
 
         channel.draw_secure_felts(9);
@@ -233,13 +223,13 @@ mod tests {
     }
 
     #[test]
-    fn test_draw_random_bytes() {
+    fn test_draw_u32s() {
         let mut channel = Poseidon31Channel::default();
 
-        let first_random_bytes = channel.draw_random_bytes();
+        let first_random_u32s = channel.draw_u32s();
 
-        // Assert that next random bytes are different.
-        assert_ne!(first_random_bytes, channel.draw_random_bytes());
+        // Assert that next random u32s are different.
+        assert_ne!(first_random_u32s, channel.draw_u32s());
     }
 
     #[test]

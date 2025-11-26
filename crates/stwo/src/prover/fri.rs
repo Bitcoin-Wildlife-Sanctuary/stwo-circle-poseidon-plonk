@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use hashbrown::HashMap;
 use itertools::Itertools;
 use num_traits::Zero;
 use tracing::instrument;
@@ -9,11 +10,11 @@ use crate::core::circle::Coset;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::fri::{
-    get_query_positions_by_log_size, FriConfig, FriLayerProof, FriProof, CIRCLE_TO_LINE_FOLD_STEP,
-    FOLD_STEP,
+    get_query_positions_by_log_size, ExtendedFriLayerProof, ExtendedFriProof, FriConfig,
+    FriLayerProof, FriLayerProofAux, FriProof, FriProofAux, CIRCLE_TO_LINE_FOLD_STEP, FOLD_STEP,
 };
 use crate::core::poly::line::{LineDomain, LinePoly};
-use crate::core::queries::Queries;
+use crate::core::queries::{draw_queries, Queries};
 use crate::core::vcs::MerkleHasher;
 use crate::prover::backend::{Col, ColumnOps};
 use crate::prover::line::LineEvaluation;
@@ -71,6 +72,12 @@ pub trait FriOps: ColumnOps<BaseField> + PolyOps + Sized + ColumnOps<SecureField
     fn decompose(
         eval: &SecureEvaluation<Self, BitReversedOrder>,
     ) -> (SecureEvaluation<Self, BitReversedOrder>, SecureField);
+}
+
+pub struct FriDecommitResult<H: MerkleHasher> {
+    pub fri_proof: ExtendedFriProof<H>,
+    pub query_positions_by_log_size: BTreeMap<u32, Vec<usize>>,
+    pub unsorted_query_locations: Vec<usize>,
 }
 
 /// A FRI prover that applies the FRI protocol to prove a set of polynomials are of low degree.
@@ -229,20 +236,26 @@ impl<'a, B: FriOps + MerkleOps<MC::H>, MC: MerkleChannel> FriProver<'a, B, MC> {
     /// Returns a FRI proof and the query positions.
     ///
     /// Returned query positions are mapped by column commitment domain log size.
-    pub fn decommit(self, channel: &mut MC::C) -> (FriProof<MC::H>, BTreeMap<u32, Vec<usize>>) {
+    pub fn decommit(self, channel: &mut MC::C) -> FriDecommitResult<MC::H> {
         let max_column_log_size = self.first_layer.max_column_log_size();
-        let queries = Queries::generate(channel, max_column_log_size, self.config.n_queries);
+        let unsorted_query_locations =
+            draw_queries(channel, max_column_log_size, self.config.n_queries);
+        let queries = Queries::new(&unsorted_query_locations, max_column_log_size);
         let column_log_sizes = self.first_layer.column_log_sizes();
         let query_positions_by_log_size =
             get_query_positions_by_log_size(&queries, column_log_sizes);
-        let proof = self.decommit_on_queries(&queries);
-        (proof, query_positions_by_log_size)
+        let fri_proof = self.decommit_on_queries(&queries);
+        FriDecommitResult {
+            fri_proof,
+            query_positions_by_log_size,
+            unsorted_query_locations,
+        }
     }
 
     /// # Panics
     ///
     /// Panics if the queries were sampled on the wrong domain size.
-    pub fn decommit_on_queries(self, queries: &Queries) -> FriProof<MC::H> {
+    pub fn decommit_on_queries(self, queries: &Queries) -> ExtendedFriProof<MC::H> {
         let Self {
             config: _,
             first_layer,
@@ -262,12 +275,23 @@ impl<'a, B: FriOps + MerkleOps<MC::H>, MC: MerkleChannel> FriProver<'a, B, MC> {
                     Some(layer_proof)
                 },
             )
-            .collect();
+            .collect_vec();
 
-        FriProof {
-            first_layer: first_layer_proof,
-            inner_layers: inner_layer_proofs,
-            last_layer_poly,
+        let (inner_proofs, inner_layers_aux): (Vec<_>, Vec<_>) = inner_layer_proofs
+            .into_iter()
+            .map(|p| (p.proof, p.aux))
+            .unzip();
+
+        ExtendedFriProof {
+            proof: FriProof {
+                first_layer: first_layer_proof.proof,
+                inner_layers: inner_proofs,
+                last_layer_poly,
+            },
+            aux: FriProofAux {
+                first_layer: first_layer_proof.aux,
+                inner_layers: inner_layers_aux,
+            },
         }
     }
 }
@@ -300,23 +324,26 @@ impl<'a, B: FriOps + MerkleOps<H>, H: MerkleHasher> FriFirstLayerProver<'a, B, H
         *self.column_log_sizes().iter().max().unwrap()
     }
 
-    fn decommit(self, queries: &Queries) -> FriLayerProof<H> {
+    fn decommit(self, queries: &Queries) -> ExtendedFriLayerProof<H> {
         let max_column_log_size = *self.column_log_sizes().iter().max().unwrap();
         assert_eq!(queries.log_domain_size, max_column_log_size);
 
         let mut fri_witness = Vec::new();
+        let mut all_values = Vec::new();
         let mut decommitment_positions_by_log_size = BTreeMap::new();
 
         for column in self.columns {
             let column_log_size = column.domain.log_size();
             let column_queries = queries.fold(queries.log_domain_size - column_log_size);
 
-            let (column_decommitment_positions, column_witness) =
+            let (column_decommitment_positions, column_witness, value_map) =
                 compute_decommitment_positions_and_witness_evals(
                     column,
                     &column_queries.positions,
                     CIRCLE_TO_LINE_FOLD_STEP,
                 );
+
+            all_values.push(value_map);
 
             decommitment_positions_by_log_size
                 .insert(column_log_size, column_decommitment_positions);
@@ -330,10 +357,13 @@ impl<'a, B: FriOps + MerkleOps<H>, H: MerkleHasher> FriFirstLayerProver<'a, B, H
 
         let commitment = self.merkle_tree.root();
 
-        FriLayerProof {
-            fri_witness,
-            decommitment,
-            commitment,
+        ExtendedFriLayerProof {
+            proof: FriLayerProof {
+                fri_witness,
+                decommitment,
+                commitment,
+            },
+            aux: FriLayerProofAux { all_values },
         }
     }
 }
@@ -374,8 +404,8 @@ impl<B: FriOps + MerkleOps<H>, H: MerkleHasher> FriInnerLayerProver<B, H> {
         }
     }
 
-    fn decommit(self, queries: &Queries) -> FriLayerProof<H> {
-        let (decommitment_positions, fri_witness) =
+    fn decommit(self, queries: &Queries) -> ExtendedFriLayerProof<H> {
+        let (decommitment_positions, fri_witness, value_map) =
             compute_decommitment_positions_and_witness_evals(
                 &self.evaluation.values,
                 queries,
@@ -390,23 +420,31 @@ impl<B: FriOps + MerkleOps<H>, H: MerkleHasher> FriInnerLayerProver<B, H> {
 
         let commitment = self.merkle_tree.root();
 
-        FriLayerProof {
-            fri_witness,
-            decommitment,
-            commitment,
+        ExtendedFriLayerProof {
+            proof: FriLayerProof {
+                fri_witness,
+                decommitment,
+                commitment,
+            },
+            aux: FriLayerProofAux {
+                all_values: vec![value_map],
+            },
         }
     }
 }
 
 /// Returns a column's merkle tree decommitment positions and the evals the verifier can't
 /// deduce from previous computations but requires for decommitment and folding.
+///
+/// Returns a map from leaf index to its value.
 fn compute_decommitment_positions_and_witness_evals(
     column: &SecureColumnByCoords<impl PolyOps>,
     query_positions: &[usize],
     fold_step: u32,
-) -> (Vec<usize>, Vec<QM31>) {
+) -> (Vec<usize>, Vec<QM31>, HashMap<usize, QM31>) {
     let mut decommitment_positions = Vec::new();
     let mut witness_evals = Vec::new();
+    let mut value_map = HashMap::new();
 
     // Group queries by the folding coset they reside in.
     for subset_queries in query_positions.chunk_by(|a, b| a >> fold_step == b >> fold_step) {
@@ -418,17 +456,17 @@ fn compute_decommitment_positions_and_witness_evals(
             // Add decommitment position.
             decommitment_positions.push(position);
 
-            // Skip evals the verifier can calculate.
-            if subset_queries_iter.next_if_eq(&&position).is_some() {
-                continue;
-            }
-
             let eval = column.at(position);
-            witness_evals.push(eval);
+            value_map.insert(position, eval);
+
+            // Only add evals the verifier can't calculate.
+            if subset_queries_iter.next_if_eq(&&position).is_none() {
+                witness_evals.push(eval);
+            }
         }
     }
 
-    (decommitment_positions, witness_evals)
+    (decommitment_positions, witness_evals, value_map)
 }
 
 #[cfg(test)]

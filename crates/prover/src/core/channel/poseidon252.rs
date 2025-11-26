@@ -60,7 +60,8 @@ impl Channel for Poseidon252Channel {
 
     fn trailing_zeros(&self) -> u32 {
         let bytes = self.digest.to_bytes_be();
-        u128::from_le_bytes(std::array::from_fn(|i| bytes[i])).trailing_zeros()
+        // Returns maximum of 128.
+        u128::from_be_bytes(bytes[16..].try_into().unwrap()).trailing_zeros()
     }
 
     fn mix_felts(&mut self, felts: &[SecureField]) {
@@ -103,8 +104,7 @@ impl Channel for Poseidon252Channel {
     }
 
     fn mix_u64(&mut self, value: u64) {
-        // Split value to 32-bit limbs representing a big endian felt252.
-        self.mix_u32s(&[0, 0, 0, 0, 0, ((value >> 32) as u32), (value as u32)])
+        self.update_digest(poseidon_hash(self.digest, value.into()));
     }
 
     fn draw_felt(&mut self) -> SecureField {
@@ -216,12 +216,14 @@ mod tests {
     pub fn test_mix_u64() {
         let mut channel = Poseidon252Channel::default();
         channel.mix_u64(0x1111222233334444);
-        let digest_64 = channel.digest;
 
-        let mut channel = Poseidon252Channel::default();
-        channel.mix_u32s(&[0, 0, 0, 0, 0, 0x11112222, 0x33334444]);
-
-        assert_eq!(digest_64, channel.digest);
+        assert_eq!(
+            channel.digest(),
+            FieldElement252::from_hex_be(
+                "0x07cecc0ee3d858c843fe63165f038353f9f80f52dd8d32eead9f635e2f7d8b8e"
+            )
+            .unwrap()
+        );
     }
 
     #[test]

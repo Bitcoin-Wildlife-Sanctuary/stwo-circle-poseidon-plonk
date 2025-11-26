@@ -143,7 +143,7 @@ impl Channel for Poseidon31Channel {
 
     fn mix_u64(&mut self, value: u64) {
         let zero = M31::zero();
-        let n1 = value % ((1 << 22) - 1); // 22 bits
+        let n1 = value & ((1 << 22) - 1); // 22 bits
         let n2 = (value >> 22) & ((1 << 21) - 1); // 21 bits
         let n3 = (value >> 43) & ((1 << 21) - 1); // 21 bits
 

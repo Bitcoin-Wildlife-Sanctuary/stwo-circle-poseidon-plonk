@@ -40,7 +40,7 @@ pub fn prove<B: BackendForChannel<MC>, MC: MerkleChannel>(
     let trace = commitment_scheme.trace();
 
     // Evaluate and commit on composition polynomial.
-    let random_coeff = channel.draw_felt();
+    let random_coeff = channel.draw_secure_felt();
 
     let span = span!(Level::INFO, "Composition", class = "Composition").entered();
     let span1 = span!(
@@ -98,7 +98,7 @@ pub fn verify<MC: MerkleChannel>(
         components: components.to_vec(),
         n_preprocessed_columns,
     };
-    let random_coeff = channel.draw_felt();
+    let random_coeff = channel.draw_secure_felt();
 
     // Read composition polynomial commitment.
     commitment_scheme.commit(
@@ -114,6 +114,13 @@ pub fn verify<MC: MerkleChannel>(
     let mut sample_points = components.mask_points(oods_point);
     // Add the composition polynomial mask points.
     sample_points.push(vec![vec![oods_point]; SECURE_EXTENSION_DEGREE]);
+    
+    let sample_points_by_column = sample_points.as_cols_ref().flatten();
+    tracing::info!("Sampling {} columns.", sample_points_by_column.len());
+    tracing::info!(
+        "Total sample points: {}.",
+        sample_points_by_column.into_iter().flatten().count()
+    );
 
     let composition_oods_eval = proof.extract_composition_oods_eval().map_err(|_| {
         VerificationError::InvalidStructure("Unexpected sampled_values structure".to_string())

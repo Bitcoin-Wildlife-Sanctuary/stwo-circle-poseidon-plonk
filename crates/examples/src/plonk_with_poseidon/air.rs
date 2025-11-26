@@ -9,24 +9,24 @@ use stwo_constraint_framework::{
     Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX,
     PREPROCESSED_TRACE_IDX,
 };
-use stwo_prover::core::air::Component;
-use stwo_prover::core::channel::{Channel, MerkleChannel};
-use stwo_prover::core::fields::m31::BaseField;
-use stwo_prover::core::fields::qm31::{SecureField, QM31};
-use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
-use stwo_prover::core::poly::circle::CanonicCoset;
-use stwo_prover::core::vcs::MerkleHasher;
-use stwo_prover::core::verifier::{verify, VerificationError};
-use stwo_prover::core::proof::StarkProof;
-use stwo_prover::prover::ComponentProver;
-use stwo_prover::prover::backend::simd::m31::LOG_N_LANES;
-use stwo_prover::prover::backend::simd::SimdBackend;
-use stwo_prover::prover::backend::BackendForChannel;
-use stwo_prover::prover::poly::circle::{CircleEvaluation, PolyOps};
-use stwo_prover::prover::poly::BitReversedOrder;
-use stwo_prover::prover::CommitmentSchemeProver;
-use stwo_prover::prover::prove;
+use stwo::core::air::Component;
+use stwo::core::channel::{Channel, MerkleChannel};
+use stwo::core::fields::m31::BaseField;
+use stwo::core::fields::qm31::{SecureField, QM31};
+use stwo::core::fields::FieldExpOps;
+use stwo::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
+use stwo::core::poly::circle::CanonicCoset;
+use stwo::core::vcs::MerkleHasher;
+use stwo::core::verifier::{verify, VerificationError};
+use stwo::core::proof::StarkProof;
+use stwo::prover::ComponentProver;
+use stwo::prover::backend::simd::m31::LOG_N_LANES;
+use stwo::prover::backend::simd::SimdBackend;
+use stwo::prover::backend::BackendForChannel;
+use stwo::prover::poly::circle::{CircleEvaluation, PolyOps};
+use stwo::prover::poly::BitReversedOrder;
+use stwo::prover::CommitmentSchemeProver;
+use stwo::prover::prove;
 use crate::plonk::Plonk;
 use crate::plonk_with_poseidon::plonk::{
     PlonkWithAcceleratorCircuitTrace, PlonkWithAcceleratorComponent, PlonkWithAcceleratorEval,
@@ -98,7 +98,7 @@ impl PlonkWithPoseidonComponents {
         lookup_elements: &PlonkWithAcceleratorLookupElements,
         stmt1: &PlonkWithPoseidonStatement1,
     ) -> Self {
-        let tree_span_provider = &mut TraceLocationAllocator::new_with_preproccessed_columns(
+        let tree_span_provider = &mut TraceLocationAllocator::new_with_preprocessed_columns(
             &chain!(
                 [
                     Plonk::new("a_wire".to_string()).id(),
@@ -493,17 +493,17 @@ mod test {
 
     use num_traits::{One, Zero};
 
-    use stwo_prover::core::air::Component;
-    use stwo_prover::core::channel::Blake2sChannel;
-    use stwo_prover::core::fields::m31::{BaseField, M31};
-    use stwo_prover::core::fields::qm31::QM31;
-    use stwo_prover::core::fri::FriConfig;
-    use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
-    use stwo_prover::core::verifier::verify;
-    use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
-    use stwo_prover::core::vcs::poseidon31_merkle::{Poseidon31MerkleChannel, Poseidon31MerkleHasher};
-    use stwo_prover::core::vcs::sha256_merkle::Sha256MerkleChannel;
-    use stwo_prover::core::vcs::sha256_poseidon31_merkle::Sha256Poseidon31MerkleChannel;
+    use stwo::core::air::Component;
+    use stwo::core::channel::Blake2sChannel;
+    use stwo::core::fields::m31::{BaseField, M31};
+    use stwo::core::fields::qm31::QM31;
+    use stwo::core::fri::FriConfig;
+    use stwo::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
+    use stwo::core::verifier::verify;
+    use stwo::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+    use stwo::core::vcs::poseidon31_merkle::{Poseidon31MerkleChannel, Poseidon31MerkleHasher};
+    use stwo::core::vcs::sha256_merkle::Sha256MerkleChannel;
+    use stwo::core::vcs::sha256_poseidon31_merkle::Sha256Poseidon31MerkleChannel;
     use crate::plonk_with_poseidon::air::{
         prove_plonk_with_poseidon, verify_plonk_with_poseidon, PlonkWithPoseidonProof,
     };

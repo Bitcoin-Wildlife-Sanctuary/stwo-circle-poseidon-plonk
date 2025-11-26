@@ -1,18 +1,20 @@
-use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
-use std::iter::zip;
-use std::ops::Deref;
+use core::fmt::{self, Display, Formatter};
+use core::iter::zip;
+use core::ops::Deref;
 
+use hashbrown::HashMap;
 use itertools::Itertools;
-use stwo_prover::core::air::accumulation::PointEvaluationAccumulator;
-use stwo_prover::core::air::Component;
-use stwo_prover::core::circle::CirclePoint;
-use stwo_prover::core::constraints::coset_vanishing;
-use stwo_prover::core::fields::qm31::SecureField;
-use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::core::pcs::{TreeSubspan, TreeVec};
-use stwo_prover::core::poly::circle::CanonicCoset;
-use stwo_prover::core::ColumnVec;
+use std_shims::{vec, String, Vec};
+use stwo::core::air::accumulation::PointEvaluationAccumulator;
+use stwo::core::air::Component;
+use stwo::core::circle::CirclePoint;
+use stwo::core::constraints::coset_vanishing;
+use stwo::core::fields::qm31::SecureField;
+use stwo::core::fields::FieldExpOps;
+use stwo::core::pcs::{TreeSubspan, TreeVec};
+use stwo::core::poly::circle::CanonicCoset;
+use stwo::core::utils::all_unique;
+use stwo::core::ColumnVec;
 
 use super::preprocessed_columns::PreProcessedColumnId;
 use super::{EvalAtRow, InfoEvaluator, PointEvaluator, PREPROCESSED_TRACE_IDX};
@@ -63,9 +65,9 @@ impl TraceLocationAllocator {
     }
 
     /// Create a new `TraceLocationAllocator` with fixed preprocessed columns setup.
-    pub fn new_with_preproccessed_columns(preprocessed_columns: &[PreProcessedColumnId]) -> Self {
+    pub fn new_with_preprocessed_columns(preprocessed_columns: &[PreProcessedColumnId]) -> Self {
         assert!(
-            preprocessed_columns.iter().all_unique(),
+            all_unique(preprocessed_columns),
             "Duplicate preprocessed columns are not allowed!"
         );
         Self {
@@ -99,7 +101,7 @@ impl TraceLocationAllocator {
 /// the SIMD backend. Note that the constraint framework only supports components with columns of
 /// the same size.
 ///
-/// [`ComponentProver`]: stwo_prover::prover::ComponentProver
+/// [`ComponentProver`]: stwo::prover::ComponentProver
 pub trait FrameworkEval {
     fn log_size(&self) -> u32;
 
@@ -141,10 +143,7 @@ impl<E: FrameworkEval> FrameworkComponent<E> {
                         location_allocator.preprocessed_columns_allocation_mode,
                         PreprocessedColumnsAllocationMode::Static
                     ) {
-                        panic!(
-                            "Preprocessed column {:?} is missing from static allocation",
-                            col
-                        );
+                        panic!("Preprocessed column {col:?} is missing from static allocation");
                     }
                     location_allocator.preprocessed_columns.push(col.clone());
                     next_column
@@ -164,7 +163,7 @@ impl<E: FrameworkEval> FrameworkComponent<E> {
         &self.trace_locations
     }
 
-    pub fn preproccessed_column_indices(&self) -> &[usize] {
+    pub fn preprocessed_column_indices(&self) -> &[usize] {
         &self.preprocessed_column_indices
     }
 
@@ -231,7 +230,7 @@ impl<E: FrameworkEval> Component for FrameworkComponent<E> {
         })
     }
 
-    fn preproccessed_column_indices(&self) -> ColumnVec<usize> {
+    fn preprocessed_column_indices(&self) -> ColumnVec<usize> {
         self.preprocessed_column_indices.clone()
     }
 
@@ -278,7 +277,7 @@ impl<E: FrameworkEval> Display for FrameworkComponent<E> {
             .for_each(|interaction| {
                 n_cols.push(interaction.len());
             });
-        writeln!(f, "n_rows 2^{}", log_n_rows)?;
+        writeln!(f, "n_rows 2^{log_n_rows}")?;
         writeln!(f, "n_constraints {}", self.n_constraints())?;
         writeln!(
             f,
@@ -292,7 +291,7 @@ impl<E: FrameworkEval> Display for FrameworkComponent<E> {
             n_cols.iter().sum::<usize>()
         )?;
         for (j, n_cols) in n_cols.into_iter().enumerate() {
-            writeln!(f, "\t Interaction {}: n_cols {}", j, n_cols)?;
+            writeln!(f, "\t Interaction {j}: n_cols {n_cols}")?;
         }
         Ok(())
     }

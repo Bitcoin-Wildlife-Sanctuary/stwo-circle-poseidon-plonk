@@ -1,39 +1,41 @@
-#![feature(portable_simd)]
+#![cfg_attr(feature = "prover", feature(portable_simd))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
 /// ! This module contains helpers to express and use constraints for components.
 mod component;
 
-// TODO(Ohad): flag this with a std feature instead.
 #[cfg(feature = "prover")]
 pub mod expr;
 mod info;
 pub mod logup;
 mod point;
 pub mod preprocessed_columns;
-#[cfg(feature = "prover")]
+#[cfg(all(feature = "prover", feature = "std"))]
 mod prover;
 
-use std::array;
-use std::fmt::Debug;
-use std::ops::{Add, AddAssign, Mul, Neg, Sub};
+use core::array;
+use core::fmt::Debug;
+use core::ops::{Add, AddAssign, Mul, Neg, Sub};
 
 pub use component::{FrameworkComponent, FrameworkEval, TraceLocationAllocator};
 pub use info::InfoEvaluator;
 use num_traits::{One, Zero};
 pub use point::PointEvaluator;
 use preprocessed_columns::PreProcessedColumnId;
-#[cfg(feature = "prover")]
+#[cfg(all(feature = "prover", feature = "std"))]
 pub use prover::{
     assert_constraints_on_polys, assert_constraints_on_trace, relation_tracker, AssertEvaluator,
     CpuDomainEvaluator, FractionWriter, LogupColGenerator, LogupTraceGenerator,
     SimdDomainEvaluator,
 };
-use stwo_prover::core::fields::m31::BaseField;
-use stwo_prover::core::fields::qm31::{SecureField, SECURE_EXTENSION_DEGREE};
-use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::core::Fraction;
+use std_shims::Vec;
+use stwo::core::fields::m31::BaseField;
+use stwo::core::fields::qm31::{SecureField, SECURE_EXTENSION_DEGREE};
+use stwo::core::fields::FieldExpOps;
+use stwo::core::Fraction;
 
 #[rustfmt::skip]
-pub use stwo_prover::core::verifier::PREPROCESSED_TRACE_IDX;
+pub use stwo::core::verifier::PREPROCESSED_TRACE_IDX;
 pub const ORIGINAL_TRACE_IDX: usize = 1;
 pub const INTERACTION_TRACE_IDX: usize = 2;
 
@@ -206,17 +208,17 @@ macro_rules! logup_proxy {
             let last_batch = *batching.iter().max().unwrap();
 
             let mut fracs_by_batch =
-                std::collections::HashMap::<usize, Vec<Fraction<Self::EF, Self::EF>>>::new();
+                hashbrown::HashMap::<usize, std_shims::Vec<Fraction<Self::EF, Self::EF>>>::new();
 
             for (batch, frac) in batching.iter().zip(self.logup.fracs.iter()) {
                 fracs_by_batch
                     .entry(*batch)
-                    .or_insert_with(Vec::new)
+                    .or_insert_with(std_shims::Vec::new)
                     .push(frac.clone());
             }
 
-            let keys_set: std::collections::HashSet<_> = fracs_by_batch.keys().cloned().collect();
-            let all_batches_set: std::collections::HashSet<_> = (0..last_batch + 1).collect();
+            let keys_set: hashbrown::HashSet<_> = fracs_by_batch.keys().cloned().collect();
+            let all_batches_set: hashbrown::HashSet<_> = (0..last_batch + 1).collect();
 
             assert_eq!(
                 keys_set, all_batches_set,
@@ -331,7 +333,7 @@ macro_rules! relation {
             pub fn dummy() -> Self {
                 Self($crate::logup::LookupElements::dummy())
             }
-            pub fn draw(channel: &mut impl stwo_prover::core::channel::Channel) -> Self {
+            pub fn draw(channel: &mut impl stwo::core::channel::Channel) -> Self {
                 Self($crate::logup::LookupElements::draw(channel))
             }
         }
@@ -366,7 +368,7 @@ macro_rules! relation {
 #[macro_export]
 macro_rules! m31 {
     ($m:expr) => {
-        stwo_prover::core::fields::m31::M31::from_u32_unchecked($m)
+        stwo::core::fields::m31::M31::from_u32_unchecked($m)
     };
 }
 
@@ -374,6 +376,6 @@ macro_rules! m31 {
 #[macro_export]
 macro_rules! qm31 {
     ($m0:expr, $m1:expr, $m2:expr, $m3:expr) => {{
-        stwo_prover::core::fields::qm31::QM31::from_u32_unchecked($m0, $m1, $m2, $m3)
+        stwo::core::fields::qm31::QM31::from_u32_unchecked($m0, $m1, $m2, $m3)
     }};
 }

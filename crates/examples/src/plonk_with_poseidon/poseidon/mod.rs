@@ -14,24 +14,24 @@ use stwo_constraint_framework::{
     assert_constraints_on_polys, EvalAtRow, FrameworkComponent, FrameworkEval, LogupTraceGenerator,
     Relation, RelationEntry, TraceLocationAllocator,
 };
-use stwo_prover::core::channel::MerkleChannel;
-use stwo_prover::core::fields::m31::{pow2147483645, BaseField, M31};
-use stwo_prover::core::fields::qm31::{SecureField, QM31};
-use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::core::pcs::PcsConfig;
-use stwo_prover::core::poly::circle::CanonicCoset;
-use stwo_prover::core::ColumnVec;
-use stwo_prover::prover::backend::simd::m31::{PackedBaseField, PackedM31, LOG_N_LANES, N_LANES};
-use stwo_prover::prover::backend::simd::qm31::PackedSecureField;
-use stwo_prover::prover::backend::simd::SimdBackend;
-use stwo_prover::prover::backend::{BackendForChannel, Col, Column};
-use stwo_prover::prover::poly::circle::{CircleEvaluation, PolyOps};
-use stwo_prover::prover::poly::BitReversedOrder;
-use stwo_prover::prover::CommitmentSchemeProver;
-use stwo_prover::prover::prove;
-use stwo_prover::core::proof::StarkProof;
-use stwo_prover::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
-use stwo_prover::core::vcs::poseidon31_ref::{
+use stwo::core::channel::MerkleChannel;
+use stwo::core::fields::m31::{pow2147483645, BaseField, M31};
+use stwo::core::fields::qm31::{SecureField, QM31};
+use stwo::core::fields::FieldExpOps;
+use stwo::core::pcs::PcsConfig;
+use stwo::core::poly::circle::CanonicCoset;
+use stwo::core::ColumnVec;
+use stwo::prover::backend::simd::m31::{PackedBaseField, PackedM31, LOG_N_LANES, N_LANES};
+use stwo::prover::backend::simd::qm31::PackedSecureField;
+use stwo::prover::backend::simd::SimdBackend;
+use stwo::prover::backend::{BackendForChannel, Col, Column};
+use stwo::prover::poly::circle::{CircleEvaluation, PolyOps};
+use stwo::prover::poly::BitReversedOrder;
+use stwo::prover::CommitmentSchemeProver;
+use stwo::prover::prove;
+use stwo::core::proof::StarkProof;
+use stwo::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
+use stwo::core::vcs::poseidon31_ref::{
     FIRST_FOUR_ROUND_RC, LAST_FOUR_ROUNDS_RC, MAT_DIAG16_M_1, PARTIAL_ROUNDS_RC,
 };
 use crate::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
@@ -1488,12 +1488,12 @@ pub fn prove_test_poseidon_accelerator(
 mod tests {
     use std::env;
 
-    use stwo_prover::core::air::Component;
-    use stwo_prover::core::channel::Blake2sChannel;
-    use stwo_prover::core::fri::FriConfig;
-    use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
-    use stwo_prover::core::verifier::verify;
-    use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+    use stwo::core::air::Component;
+    use stwo::core::channel::Blake2sChannel;
+    use stwo::core::fri::FriConfig;
+    use stwo::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
+    use stwo::core::verifier::verify;
+    use stwo::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use crate::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
     use crate::plonk_with_poseidon::poseidon::prove_test_poseidon_accelerator;
 

@@ -3,21 +3,21 @@ use std::simd::u32x16;
 use itertools::{chain, multiunzip, Itertools};
 use num_traits::Zero;
 use serde::Serialize;
+use stwo::core::air::Component;
+use stwo::core::channel::{Channel, MerkleChannel};
+use stwo::core::fields::qm31::SecureField;
+use stwo::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
+use stwo::core::poly::circle::CanonicCoset;
+use stwo::core::proof::StarkProof;
+use stwo::core::vcs::MerkleHasher;
+use stwo::core::verifier::{verify, VerificationError};
+use stwo::prover::backend::simd::m31::LOG_N_LANES;
+use stwo::prover::backend::simd::SimdBackend;
+use stwo::prover::backend::BackendForChannel;
+use stwo::prover::poly::circle::PolyOps;
+use stwo::prover::{prove, CommitmentSchemeProver, ComponentProver};
 use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
 use stwo_constraint_framework::{TraceLocationAllocator, PREPROCESSED_TRACE_IDX};
-use stwo_prover::core::air::Component;
-use stwo_prover::core::channel::{Channel, MerkleChannel};
-use stwo_prover::core::fields::qm31::SecureField;
-use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
-use stwo_prover::core::poly::circle::CanonicCoset;
-use stwo_prover::core::proof::StarkProof;
-use stwo_prover::core::vcs::MerkleHasher;
-use stwo_prover::core::verifier::{verify, VerificationError};
-use stwo_prover::prover::backend::simd::m31::LOG_N_LANES;
-use stwo_prover::prover::backend::simd::SimdBackend;
-use stwo_prover::prover::backend::BackendForChannel;
-use stwo_prover::prover::poly::circle::PolyOps;
-use stwo_prover::prover::{prove, CommitmentSchemeProver, ComponentProver};
 use tracing::{span, Level};
 
 use super::preprocessed_columns::XorTable;
@@ -166,9 +166,8 @@ pub struct BlakeComponents {
 }
 impl BlakeComponents {
     fn new(stmt0: &BlakeStatement0, all_elements: &AllElements, stmt1: &BlakeStatement1) -> Self {
-        let tree_span_provider = &mut TraceLocationAllocator::new_with_preproccessed_columns(
-            &preprocessed_xor_columns(),
-        );
+        let tree_span_provider =
+            &mut TraceLocationAllocator::new_with_preprocessed_columns(&preprocessed_xor_columns());
 
         Self {
             scheduler_component: BlakeSchedulerComponent::new(
@@ -335,7 +334,7 @@ where
     let mut xor_accums = XorAccums::default();
     let mut rest = &round_inputs[..];
     // Split round inputs to components, according to [ROUND_LOG_SPLIT].
-    let (round_traces, round_lookup_datas): (Vec<_>, Vec<_>) =
+    let (round_traces, round_lookup_data): (Vec<_>, Vec<_>) =
         multiunzip(ROUND_LOG_SPLIT.map(|l| {
             let (cur_inputs, r) = rest.split_at(1 << (log_size - LOG_N_LANES + l));
             rest = r;
@@ -385,7 +384,7 @@ where
     let (round_traces, round_claimed_sums): (Vec<_>, Vec<_>) = multiunzip(
         ROUND_LOG_SPLIT
             .iter()
-            .zip(round_lookup_datas)
+            .zip(round_lookup_data)
             .map(|(l, lookup_data)| {
                 round::generate_interaction_trace(
                     log_size + l,
@@ -521,8 +520,8 @@ pub fn verify_blake<MC: MerkleChannel>(
 mod tests {
     use std::env;
 
-    use stwo_prover::core::pcs::PcsConfig;
-    use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+    use stwo::core::pcs::PcsConfig;
+    use stwo::core::vcs::blake2_merkle::Blake2sMerkleChannel;
 
     use crate::blake::air::{prove_blake, verify_blake};
 

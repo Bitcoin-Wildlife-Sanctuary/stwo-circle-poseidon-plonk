@@ -1,8 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use stwo::core::pcs::PcsConfig;
+use stwo::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+use stwo::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
 use stwo_examples::poseidon::prove_poseidon;
-use stwo_prover::core::pcs::PcsConfig;
-use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
-use stwo_prover::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
 
 pub fn simd_poseidon_blake2s(c: &mut Criterion) {
     const LOG_N_INSTANCES: u32 = 18;

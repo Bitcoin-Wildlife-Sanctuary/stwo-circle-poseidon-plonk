@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use num_traits::Zero;
-use stwo_prover::core::Fraction;
+use stwo::core::Fraction;
 
 use super::assignment::{ExprVarAssignment, ExprVariables};
 use super::degree::NamedExprs;
@@ -107,10 +107,7 @@ impl ExprEvaluator {
                         self.ext_intermediates[name].simplify_and_format()
                     )
                 } else {
-                    panic!(
-                        "Intermediate {} not found in intermediates or ext_intermediates",
-                        name
-                    )
+                    panic!("Intermediate {name} not found in intermediates or ext_intermediates")
                 }
             })
             .collect::<Vec<String>>()
@@ -191,8 +188,7 @@ impl ExprEvaluator {
                     .insert(intermediate.clone(), expr.assign(&assignment));
             } else {
                 panic!(
-                    "Intermediate {} not found in intermediates or ext_intermediates",
-                    intermediate
+                    "Intermediate {intermediate} not found in intermediates or ext_intermediates"
                 );
             }
         }
@@ -293,7 +289,7 @@ impl EvalAtRow for ExprEvaluator {
 #[cfg(test)]
 mod tests {
     use num_traits::One;
-    use stwo_prover::core::fields::FieldExpOps;
+    use stwo::core::fields::FieldExpOps;
 
     use crate::expr::{ExprEvaluator, ExtExpr};
     use crate::{relation, EvalAtRow, FrameworkEval, RelationEntry};
@@ -459,7 +455,7 @@ mod tests {
         eval.add_to_relation(RelationEntry::new(
             &TestRelation::dummy(),
             ExtExpr::one(),
-            &[x0.clone()],
+            std::slice::from_ref(&x0),
         ));
         eval.add_to_relation(RelationEntry::new(
             &TestRelation::dummy(),

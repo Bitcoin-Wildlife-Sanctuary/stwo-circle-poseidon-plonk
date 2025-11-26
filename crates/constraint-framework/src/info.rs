@@ -1,20 +1,20 @@
-use std::array;
-use std::cell::{RefCell, RefMut};
-use std::collections::HashMap;
-use std::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub};
-use std::rc::Rc;
+use core::array;
+use core::cell::{RefCell, RefMut};
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub};
 
+use hashbrown::HashMap;
 use num_traits::{One, Zero};
-use stwo_prover::core::fields::m31::BaseField;
-use stwo_prover::core::fields::qm31::SecureField;
-use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::core::pcs::TreeVec;
-use stwo_prover::core::Fraction;
+use std_shims::{vec, Rc, String, Vec};
+use stwo::core::fields::m31::BaseField;
+use stwo::core::fields::qm31::SecureField;
+use stwo::core::fields::FieldExpOps;
+use stwo::core::pcs::TreeVec;
+use stwo::core::verifier::PREPROCESSED_TRACE_IDX;
+use stwo::core::Fraction;
 
 use super::logup::LogupAtRow;
 use super::preprocessed_columns::PreProcessedColumnId;
 use super::{EvalAtRow, Relation, RelationEntry, INTERACTION_TRACE_IDX};
-use crate::PREPROCESSED_TRACE_IDX;
 
 /// Collects information about the constraints.
 /// This includes mask offsets and columns at each interaction, the number of constraints and number
@@ -90,7 +90,7 @@ impl EvalAtRow for InfoEvaluator {
 
     fn combine_ef(values: [Self::F; 4]) -> Self::EF {
         let mut res = ExtensionFieldCounter::zero();
-        values.map(|v| res.merge(v));
+        let _ = values.map(|v| res.merge(v));
         res
     }
 
@@ -409,7 +409,10 @@ impl LogupCountPerRow {
     }
 
     pub fn inc(&mut self, relation: &str) {
-        *self.data.entry(relation.to_string()).or_insert(0) += 1;
+        *self
+            .data
+            .entry(std_shims::ToString::to_string(relation))
+            .or_insert(0) += 1;
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &usize)> {
@@ -420,8 +423,8 @@ impl LogupCountPerRow {
 #[cfg(test)]
 mod tests {
     use num_traits::{One, Zero};
-    use stwo_prover::core::fields::m31::BaseField;
-    use stwo_prover::core::fields::qm31::SecureField;
+    use stwo::core::fields::m31::BaseField;
+    use stwo::core::fields::qm31::SecureField;
 
     use super::{ExtensionFieldCounter, InfoEvaluator};
     use crate::info::{ArithmeticCounts, FieldCounter};

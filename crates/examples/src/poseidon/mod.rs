@@ -6,27 +6,26 @@ use itertools::Itertools;
 use num_traits::One;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
+use stwo::core::channel::MerkleChannel;
+use stwo::core::fields::m31::BaseField;
+use stwo::core::fields::qm31::SecureField;
+use stwo::core::fields::FieldExpOps;
+use stwo::core::pcs::PcsConfig;
+use stwo::core::poly::circle::CanonicCoset;
+use stwo::core::proof::StarkProof;
+use stwo::core::ColumnVec;
+use stwo::prover::backend::simd::column::BaseColumn;
+use stwo::prover::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
+use stwo::prover::backend::simd::qm31::PackedSecureField;
+use stwo::prover::backend::simd::SimdBackend;
+use stwo::prover::backend::{BackendForChannel, Col, Column};
+use stwo::prover::poly::circle::{CircleEvaluation, PolyOps};
+use stwo::prover::poly::BitReversedOrder;
+use stwo::prover::{prove, CommitmentSchemeProver};
 use stwo_constraint_framework::{
     relation, EvalAtRow, FrameworkComponent, FrameworkEval, LogupTraceGenerator, Relation,
     RelationEntry, TraceLocationAllocator,
 };
-use stwo_prover::core::ColumnVec;
-use stwo_prover::prover::backend::simd::column::BaseColumn;
-use stwo_prover::prover::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
-use stwo_prover::prover::backend::simd::qm31::PackedSecureField;
-use stwo_prover::prover::backend::simd::SimdBackend;
-use stwo_prover::prover::backend::{BackendForChannel, Col, Column};
-use stwo_prover::core::channel::MerkleChannel;
-use stwo_prover::core::fields::m31::BaseField;
-use stwo_prover::core::fields::qm31::SecureField;
-use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::core::pcs::PcsConfig;
-use stwo_prover::core::poly::circle::CanonicCoset;
-use stwo_prover::prover::CommitmentSchemeProver;
-use stwo_prover::prover::poly::circle::{CircleEvaluation, PolyOps};
-use stwo_prover::prover::poly::BitReversedOrder;
-use stwo_prover::prover::prove;
-use stwo_prover::core::proof::StarkProof;
 use tracing::{info, span, Level};
 
 const N_LOG_INSTANCES_PER_ROW: usize = 3;
@@ -400,18 +399,18 @@ mod tests {
     use std::{array, env};
 
     use itertools::Itertools;
+    use stwo::core::air::Component;
+    use stwo::core::channel::MerkleChannel;
+    use stwo::core::fields::m31::M31;
+    use stwo::core::fri::FriConfig;
+    use stwo::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
+    use stwo::core::poly::circle::CanonicCoset;
+    use stwo::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+    use stwo::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
+    use stwo::core::verifier::verify;
     use stwo_constraint_framework::assert_constraints_on_polys;
-    use stwo_prover::core::air::Component;
-    use stwo_prover::core::channel::MerkleChannel;
-    use stwo_prover::core::fields::m31::M31;
-    use stwo_prover::core::fri::FriConfig;
-    use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
-    use stwo_prover::core::poly::circle::CanonicCoset;
-    use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
-    use stwo_prover::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
-    use stwo_prover::core::verifier::verify;
-    use stwo_prover::prover::backend::simd::SimdBackend;
-    use stwo_prover::prover::backend::BackendForChannel;
+    use stwo::prover::backend::simd::SimdBackend;
+    use stwo::prover::backend::BackendForChannel;
     use crate::poseidon::{
         apply_internal_round_matrix, apply_m4, eval_poseidon_constraints, gen_interaction_trace,
         gen_trace, prove_poseidon, PoseidonElements,
@@ -547,7 +546,7 @@ mod tests {
     #[cfg(feature = "tracing")]
     #[test]
     fn trace_simd_poseidon_prove() {
-        use stwo_prover::tracing::SpanAccumulator;
+        use stwo::tracing::SpanAccumulator;
         use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::Registry;
 
@@ -570,6 +569,6 @@ mod tests {
 
         let csv = collector.export_csv();
 
-        println!("{}", csv);
+        println!("{csv}");
     }
 }

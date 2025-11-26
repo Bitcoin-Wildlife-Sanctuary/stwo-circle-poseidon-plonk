@@ -21,6 +21,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -522,6 +528,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
 
 [[package]]
+name = "fnv"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
+
+[[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -560,6 +578,11 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+]
 
 [[package]]
 name = "hermit-abi"
@@ -590,6 +613,7 @@ checksum = "0ad4bb2b565bca0645f4d68c5c9af97fba094e9791da685bf83cb5f3ce74acf2"
 dependencies = [
  "equivalent",
  "hashbrown",
+ "rayon",
 ]
 
 [[package]]
@@ -1063,12 +1087,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
-name = "smallvec"
-version = "1.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
-
-[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1129,14 +1147,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "std-shims"
+version = "0.1.0"
+
+[[package]]
+name = "stwo"
+version = "0.1.1"
+dependencies = [
+ "aligned",
+ "bincode",
+ "blake2",
+ "blake3",
+ "bytemuck",
+ "cfg-if",
+ "criterion",
+ "educe",
+ "fnv",
+ "hashbrown",
+ "hex",
+ "indexmap",
+ "itertools 0.12.1",
+ "num-traits",
+ "rand",
+ "rayon",
+ "serde",
+ "sha2",
+ "starknet-crypto",
+ "starknet-ff",
+ "std-shims",
+ "test-log",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "stwo-air-utils"
 version = "0.1.1"
 dependencies = [
  "bytemuck",
  "itertools 0.12.1",
  "rayon",
+ "stwo",
  "stwo-air-utils-derive",
- "stwo-prover",
 ]
 
 [[package]]
@@ -1153,11 +1207,13 @@ dependencies = [
 name = "stwo-constraint-framework"
 version = "0.1.1"
 dependencies = [
+ "hashbrown",
  "itertools 0.12.1",
  "num-traits",
  "rand",
  "rayon",
- "stwo-prover",
+ "std-shims",
+ "stwo",
  "tracing",
 ]
 
@@ -1174,40 +1230,11 @@ dependencies = [
  "rand",
  "rayon",
  "serde",
+ "stwo",
  "stwo-constraint-framework",
- "stwo-prover",
  "test-log",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "stwo-prover"
-version = "0.1.1"
-dependencies = [
- "aligned",
- "bincode",
- "blake2",
- "blake3",
- "bytemuck",
- "cfg-if",
- "criterion",
- "educe",
- "hex",
- "indexmap",
- "itertools 0.12.1",
- "num-traits",
- "rand",
- "rayon",
- "serde",
- "sha2",
- "starknet-crypto",
- "starknet-ff",
- "test-log",
- "thiserror",
- "tracing",
- "tracing-subscriber",
- "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -1262,18 +1289,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.69"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
+checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.69"
+version = "2.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
+checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1353,7 +1380,6 @@ dependencies = [
  "once_cell",
  "regex-automata",
  "sharded-slab",
- "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",

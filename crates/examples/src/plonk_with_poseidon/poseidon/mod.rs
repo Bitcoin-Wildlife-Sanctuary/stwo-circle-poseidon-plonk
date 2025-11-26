@@ -9,29 +9,31 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use tracing::{span, Level};
 
-use stwo_constraint_framework::logup::LogupTraceGenerator;
 use stwo_constraint_framework::preprocessed_columns::PreProcessedColumnId;
 use stwo_constraint_framework::{
-    assert_constraints_on_polys, EvalAtRow, FrameworkComponent, FrameworkEval, Relation,
-    RelationEntry, TraceLocationAllocator,
+    assert_constraints_on_polys, EvalAtRow, FrameworkComponent, FrameworkEval, LogupTraceGenerator,
+    Relation, RelationEntry, TraceLocationAllocator,
 };
-use stwo_prover::core::backend::simd::m31::{PackedBaseField, PackedM31, LOG_N_LANES, N_LANES};
-use stwo_prover::core::backend::simd::qm31::PackedSecureField;
-use stwo_prover::core::backend::simd::SimdBackend;
-use stwo_prover::core::backend::{BackendForChannel, Col, Column};
 use stwo_prover::core::channel::MerkleChannel;
 use stwo_prover::core::fields::m31::{pow2147483645, BaseField, M31};
 use stwo_prover::core::fields::qm31::{SecureField, QM31};
 use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::core::pcs::{CommitmentSchemeProver, PcsConfig};
-use stwo_prover::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
-use stwo_prover::core::poly::BitReversedOrder;
-use stwo_prover::core::prover::{prove, StarkProof};
+use stwo_prover::core::pcs::PcsConfig;
+use stwo_prover::core::poly::circle::CanonicCoset;
+use stwo_prover::core::ColumnVec;
+use stwo_prover::prover::backend::simd::m31::{PackedBaseField, PackedM31, LOG_N_LANES, N_LANES};
+use stwo_prover::prover::backend::simd::qm31::PackedSecureField;
+use stwo_prover::prover::backend::simd::SimdBackend;
+use stwo_prover::prover::backend::{BackendForChannel, Col, Column};
+use stwo_prover::prover::poly::circle::{CircleEvaluation, PolyOps};
+use stwo_prover::prover::poly::BitReversedOrder;
+use stwo_prover::prover::CommitmentSchemeProver;
+use stwo_prover::prover::prove;
+use stwo_prover::core::proof::StarkProof;
 use stwo_prover::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
 use stwo_prover::core::vcs::poseidon31_ref::{
     FIRST_FOUR_ROUND_RC, LAST_FOUR_ROUNDS_RC, MAT_DIAG16_M_1, PARTIAL_ROUNDS_RC,
 };
-use stwo_prover::core::ColumnVec;
 use crate::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
 
 /// Preprocessed columns for describing a plonk circuit.
@@ -1490,7 +1492,7 @@ mod tests {
     use stwo_prover::core::channel::Blake2sChannel;
     use stwo_prover::core::fri::FriConfig;
     use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
-    use stwo_prover::core::prover::verify;
+    use stwo_prover::core::verifier::verify;
     use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use crate::plonk_with_poseidon::plonk::PlonkWithAcceleratorLookupElements;
     use crate::plonk_with_poseidon::poseidon::prove_test_poseidon_accelerator;

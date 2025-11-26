@@ -4,25 +4,27 @@ use itertools::Itertools;
 use num_traits::One;
 use tracing::{span, Level};
 
-use stwo_constraint_framework::logup::LogupTraceGenerator;
 use stwo_constraint_framework::{
-    assert_constraints_on_polys, EvalAtRow, FrameworkComponent, FrameworkEval, Relation,
-    RelationEntry, TraceLocationAllocator,
+    assert_constraints_on_polys, EvalAtRow, FrameworkComponent, FrameworkEval, LogupTraceGenerator,
+    Relation, RelationEntry, TraceLocationAllocator,
 };
-use stwo_prover::core::backend::simd::column::BaseColumn;
-use stwo_prover::core::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
-use stwo_prover::core::backend::simd::qm31::PackedSecureField;
-use stwo_prover::core::backend::simd::SimdBackend;
-use stwo_prover::core::backend::{BackendForChannel, Column};
 use stwo_prover::core::channel::MerkleChannel;
 use stwo_prover::core::fields::m31::{BaseField, M31};
 use stwo_prover::core::fields::qm31::SecureField;
-use stwo_prover::core::pcs::{CommitmentSchemeProver, PcsConfig};
-use stwo_prover::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
-use stwo_prover::core::poly::BitReversedOrder;
-use stwo_prover::core::prover::{prove, StarkProof};
-use stwo_prover::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
+use stwo_prover::core::pcs::PcsConfig;
+use stwo_prover::core::poly::circle::CanonicCoset;
 use stwo_prover::core::ColumnVec;
+use stwo_prover::prover::backend::simd::column::BaseColumn;
+use stwo_prover::prover::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
+use stwo_prover::prover::backend::simd::qm31::PackedSecureField;
+use stwo_prover::prover::backend::simd::SimdBackend;
+use stwo_prover::prover::backend::{BackendForChannel, Column};
+use stwo_prover::prover::poly::circle::{CircleEvaluation, PolyOps};
+use stwo_prover::prover::poly::BitReversedOrder;
+use stwo_prover::prover::CommitmentSchemeProver;
+use stwo_prover::prover::prove;
+use stwo_prover::core::proof::StarkProof;
+use stwo_prover::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
 use crate::plonk::Plonk;
 use stwo_constraint_framework::relation;
 
@@ -472,7 +474,7 @@ mod tests {
     use stwo_prover::core::channel::Blake2sChannel;
     use stwo_prover::core::fri::FriConfig;
     use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
-    use stwo_prover::core::prover::verify;
+    use stwo_prover::core::verifier::verify;
     use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use crate::plonk_without_poseidon::plonk::{
         prove_fibonacci_plonk_without_accelerator, PlonkWithoutAcceleratorLookupElements,

@@ -9,19 +9,24 @@ use stwo_constraint_framework::{
     Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX,
     PREPROCESSED_TRACE_IDX,
 };
-use stwo_prover::core::air::{Component, ComponentProver};
-use stwo_prover::core::backend::simd::m31::LOG_N_LANES;
-use stwo_prover::core::backend::simd::SimdBackend;
-use stwo_prover::core::backend::BackendForChannel;
+use stwo_prover::core::air::Component;
 use stwo_prover::core::channel::{Channel, MerkleChannel};
 use stwo_prover::core::fields::m31::BaseField;
 use stwo_prover::core::fields::qm31::{SecureField, QM31};
 use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, PcsConfig, TreeVec};
-use stwo_prover::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
-use stwo_prover::core::poly::BitReversedOrder;
-use stwo_prover::core::prover::{prove, verify, StarkProof, VerificationError};
-use stwo_prover::core::vcs::ops::MerkleHasher;
+use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
+use stwo_prover::core::poly::circle::CanonicCoset;
+use stwo_prover::core::vcs::MerkleHasher;
+use stwo_prover::core::verifier::{verify, VerificationError};
+use stwo_prover::core::proof::StarkProof;
+use stwo_prover::prover::ComponentProver;
+use stwo_prover::prover::backend::simd::m31::LOG_N_LANES;
+use stwo_prover::prover::backend::simd::SimdBackend;
+use stwo_prover::prover::backend::BackendForChannel;
+use stwo_prover::prover::poly::circle::{CircleEvaluation, PolyOps};
+use stwo_prover::prover::poly::BitReversedOrder;
+use stwo_prover::prover::CommitmentSchemeProver;
+use stwo_prover::prover::prove;
 use crate::plonk::Plonk;
 use crate::plonk_with_poseidon::plonk::{
     PlonkWithAcceleratorCircuitTrace, PlonkWithAcceleratorComponent, PlonkWithAcceleratorEval,
@@ -494,7 +499,7 @@ mod test {
     use stwo_prover::core::fields::qm31::QM31;
     use stwo_prover::core::fri::FriConfig;
     use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
-    use stwo_prover::core::prover::verify;
+    use stwo_prover::core::verifier::verify;
     use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use stwo_prover::core::vcs::poseidon31_merkle::{Poseidon31MerkleChannel, Poseidon31MerkleHasher};
     use stwo_prover::core::vcs::sha256_merkle::Sha256MerkleChannel;

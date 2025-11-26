@@ -16,14 +16,17 @@ use stwo_prover::prover::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
 use stwo_prover::prover::backend::simd::qm31::PackedSecureField;
 use stwo_prover::prover::backend::simd::SimdBackend;
 use stwo_prover::prover::backend::{BackendForChannel, Col, Column};
-use stwo_prover::prover::backend::MerkleChannel;
+use stwo_prover::core::channel::MerkleChannel;
 use stwo_prover::core::fields::m31::BaseField;
 use stwo_prover::core::fields::qm31::SecureField;
 use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::prover::pcs::{CommitmentSchemeProver, PcsConfig};
-use stwo_prover::prover::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
+use stwo_prover::core::pcs::PcsConfig;
+use stwo_prover::core::poly::circle::CanonicCoset;
+use stwo_prover::prover::CommitmentSchemeProver;
+use stwo_prover::prover::poly::circle::{CircleEvaluation, PolyOps};
 use stwo_prover::prover::poly::BitReversedOrder;
-use stwo_prover::prover::prover::{prove, StarkProof};
+use stwo_prover::prover::prove;
+use stwo_prover::core::proof::StarkProof;
 use tracing::{info, span, Level};
 
 const N_LOG_INSTANCES_PER_ROW: usize = 3;
@@ -399,8 +402,6 @@ mod tests {
     use itertools::Itertools;
     use stwo_constraint_framework::assert_constraints_on_polys;
     use stwo_prover::core::air::Component;
-    use stwo_prover::core::backend::simd::SimdBackend;
-    use stwo_prover::core::backend::BackendForChannel;
     use stwo_prover::core::channel::MerkleChannel;
     use stwo_prover::core::fields::m31::M31;
     use stwo_prover::core::fri::FriConfig;
@@ -408,7 +409,9 @@ mod tests {
     use stwo_prover::core::poly::circle::CanonicCoset;
     use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use stwo_prover::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
-    use stwo_prover::prover::verifier::verify;
+    use stwo_prover::core::verifier::verify;
+    use stwo_prover::prover::backend::simd::SimdBackend;
+    use stwo_prover::prover::backend::BackendForChannel;
     use crate::poseidon::{
         apply_internal_round_matrix, apply_m4, eval_poseidon_constraints, gen_interaction_trace,
         gen_trace, prove_poseidon, PoseidonElements,

@@ -6,8 +6,7 @@ use starknet_ff::FieldElement as FieldElement252;
 
 use super::{Channel, ChannelTime};
 use crate::core::fields::m31::BaseField;
-use crate::core::fields::qm31::SecureField;
-use crate::core::fields::secure_column::SECURE_EXTENSION_DEGREE;
+use crate::core::fields::qm31::{SecureField, SECURE_EXTENSION_DEGREE};
 
 // Number of bytes that fit into a felt252.
 pub const BYTES_PER_FELT252: usize = 252 / 8;
@@ -73,9 +72,7 @@ impl Channel for Poseidon252Channel {
                 chunk
                     .iter()
                     .flat_map(|x| x.to_m31_array())
-                    .fold(FieldElement252::default(), |cur, y| {
-                        cur * shift + y.0.into()
-                    }),
+                    .fold(FieldElement252::ONE, |cur, y| cur * shift + y.0.into()),
             );
         }
 

@@ -4,8 +4,7 @@ use num_traits::Zero;
 
 use crate::core::channel::{Channel, ChannelTime};
 use crate::core::fields::m31::{BaseField, M31, P};
-use crate::core::fields::qm31::SecureField;
-use crate::core::fields::secure_column::SECURE_EXTENSION_DEGREE;
+use crate::core::fields::qm31::{SecureField, SECURE_EXTENSION_DEGREE};
 use crate::core::vcs::poseidon31_ref::poseidon2_permute;
 
 pub const POSEIDON31_BYTES_PER_HASH: usize = 32;

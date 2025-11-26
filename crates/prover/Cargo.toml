@@ -20,14 +20,14 @@ hex.workspace = true
 indexmap = "2.7.1"
 itertools.workspace = true
 num-traits.workspace = true
-rand = { version = "0.8.5", default-features = false, features = ["small_rng"] }
+rand.workspace = true
 starknet-crypto = "0.6.2"
 starknet-ff = "0.3.7"
 thiserror.workspace = true
 tracing.workspace = true
-rayon = { version = "1.10.0", optional = true }
-serde = { version = "1.0", features = ["derive"] }
-tracing-subscriber = "0.3.18"
+rayon = { workspace = true, optional = true }
+serde.workspace = true
+tracing-subscriber.workspace = true
 sha2.workspace = true
 bincode.workspace = true
 
@@ -88,15 +88,7 @@ name = "lookups"
 
 [[bench]]
 harness = false
-name = "matrix"
-
-[[bench]]
-harness = false
 name = "merkle"
-
-[[bench]]
-harness = false
-name = "poseidon"
 
 [[bench]]
 harness = false

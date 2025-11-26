@@ -14,12 +14,7 @@
     portable_simd,
     slice_ptr_get
 )]
-pub mod constraint_framework;
 pub mod core;
-pub mod examples;
-
-// TODO(Ohad): find a better way to test poseidon and depracate `math.rs`.
-pub mod math;
 
 #[cfg(feature = "tracing")]
 pub mod tracing;

@@ -5,32 +5,32 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use tracing::{span, Level};
 
-use crate::constraint_framework::{
+use stwo_constraint_framework::{
     Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX,
     PREPROCESSED_TRACE_IDX,
 };
-use crate::core::air::{Component, ComponentProver};
-use crate::core::backend::simd::m31::LOG_N_LANES;
-use crate::core::backend::simd::SimdBackend;
-use crate::core::backend::BackendForChannel;
-use crate::core::channel::{Channel, MerkleChannel};
-use crate::core::fields::m31::BaseField;
-use crate::core::fields::qm31::{SecureField, QM31};
-use crate::core::fields::FieldExpOps;
-use crate::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, PcsConfig, TreeVec};
-use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
-use crate::core::poly::BitReversedOrder;
-use crate::core::prover::{prove, verify, StarkProof, VerificationError};
-use crate::core::vcs::ops::MerkleHasher;
-use crate::examples::plonk::Plonk;
-use crate::examples::plonk_with_poseidon::plonk::{
+use stwo_prover::core::air::{Component, ComponentProver};
+use stwo_prover::core::backend::simd::m31::LOG_N_LANES;
+use stwo_prover::core::backend::simd::SimdBackend;
+use stwo_prover::core::backend::BackendForChannel;
+use stwo_prover::core::channel::{Channel, MerkleChannel};
+use stwo_prover::core::fields::m31::BaseField;
+use stwo_prover::core::fields::qm31::{SecureField, QM31};
+use stwo_prover::core::fields::FieldExpOps;
+use stwo_prover::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, PcsConfig, TreeVec};
+use stwo_prover::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
+use stwo_prover::core::poly::BitReversedOrder;
+use stwo_prover::core::prover::{prove, verify, StarkProof, VerificationError};
+use stwo_prover::core::vcs::ops::MerkleHasher;
+use crate::plonk::Plonk;
+use crate::plonk_with_poseidon::plonk::{
     PlonkWithAcceleratorCircuitTrace, PlonkWithAcceleratorComponent, PlonkWithAcceleratorEval,
     PlonkWithAcceleratorLookupElements,
 };
-use crate::examples::plonk_with_poseidon::poseidon::{
+use crate::plonk_with_poseidon::poseidon::{
     check_trace, Poseidon, PoseidonAcceleratorComponent, PoseidonAcceleratorEval, PoseidonFlow,
 };
-use crate::examples::plonk_with_poseidon::{plonk, poseidon};
+use crate::plonk_with_poseidon::{plonk, poseidon};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PlonkWithPoseidonStatement0 {
@@ -488,25 +488,25 @@ mod test {
 
     use num_traits::{One, Zero};
 
-    use crate::core::air::Component;
-    use crate::core::channel::Blake2sChannel;
-    use crate::core::fields::m31::{BaseField, M31};
-    use crate::core::fields::qm31::QM31;
-    use crate::core::fri::FriConfig;
-    use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
-    use crate::core::prover::verify;
-    use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
-    use crate::core::vcs::poseidon31_merkle::{Poseidon31MerkleChannel, Poseidon31MerkleHasher};
-    use crate::core::vcs::sha256_merkle::Sha256MerkleChannel;
-    use crate::core::vcs::sha256_poseidon31_merkle::Sha256Poseidon31MerkleChannel;
-    use crate::examples::plonk_with_poseidon::air::{
+    use stwo_prover::core::air::Component;
+    use stwo_prover::core::channel::Blake2sChannel;
+    use stwo_prover::core::fields::m31::{BaseField, M31};
+    use stwo_prover::core::fields::qm31::QM31;
+    use stwo_prover::core::fri::FriConfig;
+    use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
+    use stwo_prover::core::prover::verify;
+    use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+    use stwo_prover::core::vcs::poseidon31_merkle::{Poseidon31MerkleChannel, Poseidon31MerkleHasher};
+    use stwo_prover::core::vcs::sha256_merkle::Sha256MerkleChannel;
+    use stwo_prover::core::vcs::sha256_poseidon31_merkle::Sha256Poseidon31MerkleChannel;
+    use crate::plonk_with_poseidon::air::{
         prove_plonk_with_poseidon, verify_plonk_with_poseidon, PlonkWithPoseidonProof,
     };
-    use crate::examples::plonk_with_poseidon::plonk::{
+    use crate::plonk_with_poseidon::plonk::{
         prove_plonk_with_accelerator, PlonkWithAcceleratorCircuitTrace,
         PlonkWithAcceleratorLookupElements,
     };
-    use crate::examples::plonk_with_poseidon::poseidon::{
+    use crate::plonk_with_poseidon::poseidon::{
         prove_poseidon_accelerator, PoseidonEntry, PoseidonFlow, SwapOption, CONSTANT_1,
         CONSTANT_2, CONSTANT_3,
     };

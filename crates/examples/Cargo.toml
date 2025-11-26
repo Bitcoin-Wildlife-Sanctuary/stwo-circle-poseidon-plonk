@@ -22,6 +22,7 @@ stwo-prover = { path = "../prover" }
 stwo-constraint-framework = { path = "../constraint_framework" }
 rand.workspace = true
 educe.workspace = true
+bincode.workspace = true
 
 [dev-dependencies]
 criterion = { default-features = false, features = [

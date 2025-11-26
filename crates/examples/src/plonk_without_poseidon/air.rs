@@ -3,23 +3,23 @@ use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use tracing::{span, Level};
 
-use crate::constraint_framework::{
+use stwo_constraint_framework::{
     Relation, TraceLocationAllocator, INTERACTION_TRACE_IDX, ORIGINAL_TRACE_IDX,
     PREPROCESSED_TRACE_IDX,
 };
-use crate::core::backend::simd::m31::LOG_N_LANES;
-use crate::core::backend::simd::SimdBackend;
-use crate::core::backend::BackendForChannel;
-use crate::core::channel::{Channel, MerkleChannel};
-use crate::core::fields::m31::BaseField;
-use crate::core::fields::qm31::{SecureField, QM31};
-use crate::core::fields::FieldExpOps;
-use crate::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, PcsConfig, TreeVec};
-use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
-use crate::core::poly::BitReversedOrder;
-use crate::core::prover::{prove, verify, StarkProof, VerificationError};
-use crate::core::vcs::ops::MerkleHasher;
-use crate::examples::plonk_without_poseidon::plonk::{
+use stwo_prover::core::backend::simd::m31::LOG_N_LANES;
+use stwo_prover::core::backend::simd::SimdBackend;
+use stwo_prover::core::backend::BackendForChannel;
+use stwo_prover::core::channel::{Channel, MerkleChannel};
+use stwo_prover::core::fields::m31::BaseField;
+use stwo_prover::core::fields::qm31::{SecureField, QM31};
+use stwo_prover::core::fields::FieldExpOps;
+use stwo_prover::core::pcs::{CommitmentSchemeProver, CommitmentSchemeVerifier, PcsConfig, TreeVec};
+use stwo_prover::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
+use stwo_prover::core::poly::BitReversedOrder;
+use stwo_prover::core::prover::{prove, verify, StarkProof, VerificationError};
+use stwo_prover::core::vcs::ops::MerkleHasher;
+use crate::plonk_without_poseidon::plonk::{
     gen_interaction_trace, gen_trace, PlonkWithoutAcceleratorCircuitTrace,
     PlonkWithoutAcceleratorComponent, PlonkWithoutAcceleratorEval,
     PlonkWithoutAcceleratorLookupElements,

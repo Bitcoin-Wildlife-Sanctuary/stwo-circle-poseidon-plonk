@@ -4,27 +4,27 @@ use itertools::Itertools;
 use num_traits::One;
 use tracing::{span, Level};
 
-use crate::constraint_framework::logup::LogupTraceGenerator;
-use crate::constraint_framework::{
+use stwo_constraint_framework::logup::LogupTraceGenerator;
+use stwo_constraint_framework::{
     assert_constraints_on_polys, EvalAtRow, FrameworkComponent, FrameworkEval, Relation,
     RelationEntry, TraceLocationAllocator,
 };
-use crate::core::backend::simd::column::BaseColumn;
-use crate::core::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
-use crate::core::backend::simd::qm31::PackedSecureField;
-use crate::core::backend::simd::SimdBackend;
-use crate::core::backend::{BackendForChannel, Column};
-use crate::core::channel::MerkleChannel;
-use crate::core::fields::m31::{BaseField, M31};
-use crate::core::fields::qm31::SecureField;
-use crate::core::pcs::{CommitmentSchemeProver, PcsConfig};
-use crate::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
-use crate::core::poly::BitReversedOrder;
-use crate::core::prover::{prove, StarkProof};
-use crate::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
-use crate::core::ColumnVec;
-use crate::examples::plonk::Plonk;
-use crate::relation;
+use stwo_prover::core::backend::simd::column::BaseColumn;
+use stwo_prover::core::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
+use stwo_prover::core::backend::simd::qm31::PackedSecureField;
+use stwo_prover::core::backend::simd::SimdBackend;
+use stwo_prover::core::backend::{BackendForChannel, Column};
+use stwo_prover::core::channel::MerkleChannel;
+use stwo_prover::core::fields::m31::{BaseField, M31};
+use stwo_prover::core::fields::qm31::SecureField;
+use stwo_prover::core::pcs::{CommitmentSchemeProver, PcsConfig};
+use stwo_prover::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
+use stwo_prover::core::poly::BitReversedOrder;
+use stwo_prover::core::prover::{prove, StarkProof};
+use stwo_prover::core::vcs::blake2_merkle::{Blake2sMerkleChannel, Blake2sMerkleHasher};
+use stwo_prover::core::ColumnVec;
+use crate::plonk::Plonk;
+use stwo_constraint_framework::relation;
 
 pub type PlonkWithAcceleratorComponent = FrameworkComponent<PlonkWithAcceleratorEval>;
 relation!(PlonkWithAcceleratorLookupElements, 3);
@@ -432,13 +432,13 @@ pub fn prove_fibonacci_plonk_with_accelerator(
 mod tests {
     use std::env;
 
-    use crate::core::air::Component;
-    use crate::core::channel::Blake2sChannel;
-    use crate::core::fri::FriConfig;
-    use crate::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
-    use crate::core::prover::verify;
-    use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
-    use crate::examples::plonk_with_poseidon::plonk::{
+    use stwo_prover::core::air::Component;
+    use stwo_prover::core::channel::Blake2sChannel;
+    use stwo_prover::core::fri::FriConfig;
+    use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig};
+    use stwo_prover::core::prover::verify;
+    use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+    use crate::plonk_with_poseidon::plonk::{
         prove_fibonacci_plonk_with_accelerator, PlonkWithAcceleratorLookupElements,
     };
 

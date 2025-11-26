@@ -111,12 +111,9 @@ impl MerkleChannel for Sha256Poseidon31MerkleChannel {
 mod tests {
     use num_traits::Zero;
 
-    use crate::core::channel::{MerkleChannel, Sha256Poseidon31Channel};
     use crate::core::fields::m31::BaseField;
     use crate::core::vcs::sha256_hash::Sha256Hash;
-    use crate::core::vcs::sha256_poseidon31_merkle::{
-        Sha256Poseidon31MerkleChannel, Sha256Poseidon31MerkleHasher,
-    };
+    use crate::core::vcs::sha256_poseidon31_merkle::Sha256Poseidon31MerkleHasher;
     use crate::core::vcs::test_utils::prepare_merkle;
     use crate::core::vcs::verifier::MerkleVerificationError;
 
@@ -198,14 +195,5 @@ mod tests {
             verifier.verify(&queries, values, decommitment).unwrap_err(),
             MerkleVerificationError::TooFewQueriedValues
         );
-    }
-
-    #[test]
-    fn test_merkle_channel() {
-        let mut channel = Sha256Poseidon31Channel::default();
-        let (_queries, _decommitment, _values, verifier) =
-            prepare_merkle::<Sha256Poseidon31MerkleHasher>();
-        Sha256Poseidon31MerkleChannel::mix_root(&mut channel, verifier.root);
-        assert_eq!(channel.inner.channel_time.n_challenges, 1);
     }
 }

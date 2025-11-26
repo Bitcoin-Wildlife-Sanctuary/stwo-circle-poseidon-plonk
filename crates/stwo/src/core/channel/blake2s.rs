@@ -3,7 +3,7 @@ use core::{array, iter};
 use itertools::Itertools;
 use std_shims::Vec;
 
-use super::{Channel, ChannelTime};
+use super::Channel;
 use crate::core::fields::m31::{BaseField, N_BYTES_FELT, P};
 use crate::core::fields::qm31::{SecureField, SECURE_EXTENSION_DEGREE};
 use crate::core::vcs::blake2_hash::{Blake2sHash, Blake2sHasher};
@@ -15,16 +15,18 @@ pub const FELTS_PER_HASH: usize = 8;
 #[derive(Default, Clone, Debug)]
 pub struct Blake2sChannel {
     digest: Blake2sHash,
-    pub channel_time: ChannelTime,
+    n_draws: u32,
 }
 
 impl Blake2sChannel {
+    pub const POW_PREFIX: u32 = 0x12345678;
+
     pub const fn digest(&self) -> Blake2sHash {
         self.digest
     }
     pub const fn update_digest(&mut self, new_digest: Blake2sHash) {
         self.digest = new_digest;
-        self.channel_time.inc_challenges();
+        self.n_draws = 0;
     }
     /// Generates a uniform random vector of BaseField elements.
     fn draw_base_felts(&mut self) -> [BaseField; FELTS_PER_HASH] {
@@ -54,10 +56,6 @@ impl Blake2sChannel {
 
 impl Channel for Blake2sChannel {
     const BYTES_PER_HASH: usize = BLAKE_BYTES_PER_HASH;
-
-    fn trailing_zeros(&self) -> u32 {
-        u128::from_le_bytes(array::from_fn(|i| self.digest.0[i])).trailing_zeros()
-    }
 
     fn mix_felts(&mut self, felts: &[SecureField]) {
         let felts_bytes = felts
@@ -108,11 +106,33 @@ impl Channel for Blake2sChannel {
         let mut hash_input = self.digest.as_ref().to_vec();
 
         // Append counter bytes directly (4 bytes for u32).
-        let counter_bytes = self.channel_time.n_sent.to_le_bytes();
+        let counter_bytes = self.n_draws.to_le_bytes();
         hash_input.extend_from_slice(&counter_bytes);
 
-        self.channel_time.inc_sent();
+        // Append a zero byte for domain separation between generating randomness and mixing a
+        // single u32.
+        hash_input.push(0_u8);
+
+        self.n_draws += 1;
         Blake2sHasher::hash(&hash_input).into()
+    }
+    /// Verifies that `H(H(POW_PREFIX, digest, n_bits), nonce)` has at least `n_bits` many
+    /// leading zeros.
+    fn verify_pow_nonce(&self, n_bits: u32, nonce: u64) -> bool {
+        let digest = self.digest();
+        // Compute H(POW_PREFIX, digest, n_bits).
+        let mut hasher = Blake2sHasher::default();
+        hasher.update(&Self::POW_PREFIX.to_le_bytes());
+        hasher.update(&digest.0[..]);
+        hasher.update(&n_bits.to_le_bytes());
+        let prefixed_digest = hasher.finalize();
+        // Compute `H(prefixed_digest, nonce)`.
+        let mut hasher = Blake2sHasher::default();
+        hasher.update(prefixed_digest.as_ref());
+        hasher.update(&nonce.to_le_bytes());
+        let res = hasher.finalize();
+        let n_zeros = u128::from_le_bytes(array::from_fn(|i| res.0[i])).trailing_zeros();
+        n_zeros >= n_bits
     }
 }
 
@@ -127,19 +147,16 @@ mod tests {
     use crate::m31;
 
     #[test]
-    fn test_channel_time() {
+    fn test_channel_draws() {
         let mut channel = Blake2sChannel::default();
 
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 0);
+        assert_eq!(channel.n_draws, 0);
 
         channel.draw_random_bytes();
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 1);
+        assert_eq!(channel.n_draws, 1);
 
         channel.draw_secure_felts(9);
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 6);
+        assert_eq!(channel.n_draws, 6);
     }
 
     #[test]
@@ -179,26 +196,26 @@ mod tests {
     #[test]
     pub fn test_mix_felts() {
         let mut channel = Blake2sChannel::default();
-        let initial_digest = channel.digest;
+        let initial_digest = channel.digest();
         let felts = (0..2)
             .map(|i| SecureField::from(m31!(i + 1923782)))
             .collect_vec();
 
         channel.mix_felts(felts.as_slice());
 
-        assert_ne!(initial_digest, channel.digest);
+        assert_ne!(initial_digest, channel.digest());
     }
 
     #[test]
     pub fn test_mix_u64() {
         let mut channel = Blake2sChannel::default();
         channel.mix_u64(0x1111222233334444);
-        let digest_64 = channel.digest;
+        let digest_64 = channel.digest();
 
         let mut channel = Blake2sChannel::default();
         channel.mix_u32s(&[0x33334444, 0x11112222]);
 
-        assert_eq!(digest_64, channel.digest);
+        assert_eq!(digest_64, channel.digest());
         let digest_bytes: [u8; 32] = digest_64.into();
         assert_eq!(
             digest_bytes,
@@ -214,7 +231,7 @@ mod tests {
     pub fn test_mix_u32s() {
         let mut channel = Blake2sChannel::default();
         channel.mix_u32s(&[1, 2, 3, 4, 5, 6, 7, 8, 9]);
-        let digest: [u8; 32] = channel.digest.into();
+        let digest: [u8; 32] = channel.digest().into();
         assert_eq!(
             digest,
             [

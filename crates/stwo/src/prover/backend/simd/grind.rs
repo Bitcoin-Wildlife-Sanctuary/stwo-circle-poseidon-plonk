@@ -16,6 +16,7 @@ use crate::core::channel::{
 use crate::core::channel::Channel;
 use crate::core::fields::m31::M31;
 use crate::core::proof_of_work::GrindOps;
+use crate::core::vcs::blake2_hash::Blake2sHasher;
 use crate::core::vcs::sha256_hash::Sha256Hash;
 use crate::prover::backend::simd::blake2s::hash_16;
 use crate::prover::backend::simd::m31::{PackedM31, N_LANES};
@@ -56,8 +57,7 @@ fn grind_sha256(digest: Sha256Hash, hi: u64, pow_bits: u32) -> Option<u64> {
     for low in 0..(1 << GRIND_LOW_BITS) {
         let mut this_channel = Sha256Channel::default();
         this_channel.update_digest(Sha256Hash::from(digest));
-        this_channel.mix_u64(high_start + low);
-        if this_channel.trailing_zeros() >= pow_bits {
+        if this_channel.verify_pow_nonce(pow_bits, high_start + low) {
             return Some(high_start + low);
         }
     }
@@ -71,15 +71,21 @@ impl GrindOps<Blake2sChannel> for SimdBackend {
         // TODO(first): support more than 32 bits.
         assert!(pow_bits <= 32, "pow_bits > 32 is not supported");
         let digest = channel.digest();
-        let digest: &[u32] = cast_slice(&digest.0[..]);
+
+        let mut hasher = Blake2sHasher::default();
+        hasher.update(&Blake2sChannel::POW_PREFIX.to_le_bytes());
+        hasher.update(&digest.0[..]);
+        hasher.update(&pow_bits.to_le_bytes());
+        let prefixed_digest = hasher.finalize();
+        let prefixed_digest: &[u32] = cast_slice(&prefixed_digest.0[..]);
 
         #[cfg(not(feature = "parallel"))]
         let res = (0..)
-            .find_map(|hi| grind_blake(digest, hi, pow_bits))
+            .find_map(|hi| grind_blake(prefixed_digest, hi, pow_bits))
             .expect("Grind failed to find a solution.");
 
         #[cfg(feature = "parallel")]
-        let res = parallel_grind(digest, pow_bits, grind_blake);
+        let res = parallel_grind(prefixed_digest, pow_bits, grind_blake);
 
         res
     }
@@ -162,6 +168,7 @@ where
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod poseidon252 {
+    use starknet_crypto::poseidon_hash_many;
     use starknet_ff::FieldElement as FieldElement252;
 
     use super::*;
@@ -172,14 +179,18 @@ pub mod poseidon252 {
     impl GrindOps<Poseidon252Channel> for SimdBackend {
         fn grind(channel: &Poseidon252Channel, pow_bits: u32) -> u64 {
             let digest = channel.digest();
-
+            let prefixed_digest = poseidon_hash_many(&[
+                Poseidon252Channel::POW_PREFIX.into(),
+                digest,
+                pow_bits.into(),
+            ]);
             #[cfg(not(feature = "parallel"))]
             let res = (0..)
                 .find_map(|hi| grind_poseidon(digest, hi, pow_bits))
                 .expect("Grind failed to find a solution.");
 
             #[cfg(feature = "parallel")]
-            let res = parallel_grind(digest, pow_bits, grind_poseidon);
+            let res = parallel_grind(prefixed_digest, pow_bits, grind_poseidon);
             res
         }
     }
@@ -231,7 +242,7 @@ fn grind_poseidon31(digest: [M31; 8], hi: u64, pow_bits: u32) -> Option<u64> {
         let start = high_start + low;
 
         attempt[0] = PackedM31::from_array(std::array::from_fn(|i| {
-            M31::from_u32_unchecked(((start + i as u64) % ((1 << 22) - 1)) as u32)
+            M31::from_u32_unchecked(((start + i as u64) & ((1 << 22) - 1)) as u32)
         }));
         attempt[1] = PackedM31::from_array(std::array::from_fn(|i| {
             M31::from_u32_unchecked((((start + i as u64) >> 22) & ((1 << 21) - 1)) as u32)
@@ -265,8 +276,8 @@ mod tests {
         let pow_bits = 26;
         for _ in 0..10 {
             let res = SimdBackend::grind(&channel, pow_bits);
+            assert!(channel.verify_pow_nonce(pow_bits, res));
             channel.mix_u64(res);
-            assert!(channel.trailing_zeros() >= pow_bits);
             channel.mix_u64(0x1111222233334344);
         }
     }
@@ -279,9 +290,7 @@ mod tests {
         channel.mix_u64(0x1111222233334344);
 
         let nonce = SimdBackend::grind(&channel, pow_bits);
-        channel.mix_u64(nonce);
-
-        assert!(channel.trailing_zeros() >= pow_bits);
+        assert!(channel.verify_pow_nonce(pow_bits, nonce));
     }
 
     fn test_grind_is_deterministic<C: Channel>()

@@ -1,13 +1,14 @@
 use core::{array, iter};
 
 use itertools::Itertools;
-use starknet_crypto::{poseidon_hash, poseidon_hash_many};
+use starknet_crypto::{poseidon_hash, poseidon_hash_many, poseidon_permute_comp};
 use starknet_ff::FieldElement as FieldElement252;
 use std_shims::{vec, Vec};
 
-use super::{Channel, ChannelTime};
+use super::Channel;
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::{SecureField, SECURE_EXTENSION_DEGREE};
+use crate::core::vcs::utils::add_length_padding;
 
 // Number of bytes that fit into a felt252.
 pub const BYTES_PER_FELT252: usize = 252 / 8;
@@ -17,20 +18,28 @@ pub const FELTS_PER_HASH: usize = 8;
 #[derive(Clone, Default, Debug)]
 pub struct Poseidon252Channel {
     digest: FieldElement252,
-    pub channel_time: ChannelTime,
+    n_draws: u32,
 }
 
 impl Poseidon252Channel {
+    pub const POW_PREFIX: u32 = 0x12345678;
+
     pub const fn digest(&self) -> FieldElement252 {
         self.digest
     }
     pub const fn update_digest(&mut self, new_digest: FieldElement252) {
         self.digest = new_digest;
-        self.channel_time.inc_challenges();
+        self.n_draws = 0;
     }
+
     fn draw_secure_felt252(&mut self) -> FieldElement252 {
-        let res = poseidon_hash(self.digest, self.channel_time.n_sent.into());
-        self.channel_time.inc_sent();
+        // We call `poseidon_permute_comp` here with `FieldElement252::THREE` to ensure domain
+        // separation between the draw and mix operations. In all mix functions, the constant used
+        // is either ZERO or TWO, so using THREE here distinguishes this context.
+        let mut state = [self.digest, self.n_draws.into(), FieldElement252::THREE];
+        poseidon_permute_comp(&mut state);
+        let res = state[0];
+        self.n_draws += 1;
         res
     }
 
@@ -58,12 +67,6 @@ impl Poseidon252Channel {
 impl Channel for Poseidon252Channel {
     const BYTES_PER_HASH: usize = BYTES_PER_FELT252;
 
-    fn trailing_zeros(&self) -> u32 {
-        let bytes = self.digest.to_bytes_be();
-        // Returns maximum of 128.
-        u128::from_be_bytes(bytes[16..].try_into().unwrap()).trailing_zeros()
-    }
-
     fn mix_felts(&mut self, felts: &[SecureField]) {
         let shift = (1u64 << 31).into();
         let mut res = Vec::with_capacity(felts.len() / 2 + 2);
@@ -85,7 +88,7 @@ impl Channel for Poseidon252Channel {
     fn mix_u32s(&mut self, data: &[u32]) {
         let shift = (1u64 << 32).into();
         let padding_len = 6 - ((data.len() + 6) % 7);
-        let felts = data
+        let mut felts = data
             .iter()
             .chain(iter::repeat_n(&0, padding_len))
             .chunks(7)
@@ -96,8 +99,12 @@ impl Channel for Poseidon252Channel {
                 })
             })
             .collect_vec();
-
-        // TODO(shahars): do we need length padding?
+        // If `data.len() % 7 != 0`, inject it into the bits [248:251] of the last
+        // felt252.
+        if padding_len != 0 {
+            let last = felts.last_mut().unwrap();
+            add_length_padding(last, 7 - padding_len);
+        }
         self.update_digest(poseidon_hash_many(&[vec![self.digest], felts].concat()));
     }
 
@@ -134,6 +141,17 @@ impl Channel for Poseidon252Channel {
         });
         bytes.to_vec()
     }
+
+    /// Verifies that `H(H(POW_PREFIX, digest, n_bits), nonce)` has at least `n_bits` many
+    /// leading zeros.
+    fn verify_pow_nonce(&self, n_bits: u32, nonce: u64) -> bool {
+        let prefixed_digest =
+            poseidon_hash_many(&[Self::POW_PREFIX.into(), self.digest, n_bits.into()]);
+        let hash = poseidon_hash(prefixed_digest, nonce.into());
+        let bytes = hash.to_bytes_be();
+        let n_zeros = u128::from_be_bytes(bytes[16..].try_into().unwrap()).trailing_zeros();
+        n_zeros >= n_bits
+    }
 }
 
 #[cfg(test)]
@@ -148,19 +166,16 @@ mod tests {
     use crate::m31;
 
     #[test]
-    fn test_channel_time() {
+    fn test_channel_draws() {
         let mut channel = Poseidon252Channel::default();
 
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 0);
+        assert_eq!(channel.n_draws, 0);
 
         channel.draw_random_bytes();
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 1);
+        assert_eq!(channel.n_draws, 1);
 
         channel.draw_secure_felts(9);
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 6);
+        assert_eq!(channel.n_draws, 6);
     }
 
     #[test]
@@ -231,7 +246,7 @@ mod tests {
         assert_eq!(
             channel.digest,
             FieldElement252::from_hex_be(
-                "0x078f5cf6a2e7362b75fc1f94daeae7ebddd64e6b2db771717519af7193dfa80b"
+                "0x06c7fc11690eb272bcc81115e801ad52de4e6271ddff3f97a2b75315e3572ced"
             )
             .unwrap()
         );

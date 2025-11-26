@@ -23,8 +23,8 @@ impl Sha256Poseidon31Channel {
 impl Channel for Sha256Poseidon31Channel {
     const BYTES_PER_HASH: usize = 32;
 
-    fn trailing_zeros(&self) -> u32 {
-        self.inner.trailing_zeros()
+    fn verify_pow_nonce(&self, n_bits: u32, nonce: u64) -> bool {
+        self.inner.verify_pow_nonce(n_bits, nonce)
     }
 
     fn mix_felts(&mut self, felts: &[SecureField]) {

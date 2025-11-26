@@ -2,7 +2,7 @@ use std::iter;
 
 use num_traits::Zero;
 
-use crate::core::channel::{Channel, ChannelTime};
+use crate::core::channel::Channel;
 use crate::core::fields::m31::{BaseField, M31, P};
 use crate::core::fields::qm31::{SecureField, SECURE_EXTENSION_DEGREE};
 use crate::core::vcs::poseidon31_ref::poseidon2_permute;
@@ -11,10 +11,14 @@ pub const POSEIDON31_BYTES_PER_HASH: usize = 32;
 pub const FELTS_PER_HASH: usize = 8;
 
 /// A channel that can be used to draw random elements from a Poseidon31 hash.
+///
+/// Note: This channel does not support domain separation like Blake2s and SHA256 channels.
+/// The Poseidon31 hash function does not have a built-in mechanism for domain separation,
+/// so all operations use the same hash context.
 #[derive(Debug, Clone, Default)]
 pub struct Poseidon31Channel {
     digest: [M31; 8],
-    pub channel_time: ChannelTime,
+    n_draws: u32,
 }
 
 impl Poseidon31Channel {
@@ -23,13 +27,13 @@ impl Poseidon31Channel {
     }
     pub fn update_digest(&mut self, new_digest: [M31; 8]) {
         self.digest = new_digest;
-        self.channel_time.inc_challenges();
+        self.n_draws = 0;
     }
 
     fn draw_base_felts(&mut self) -> [BaseField; FELTS_PER_HASH] {
-        assert!((self.channel_time.n_sent as u64) < (P as u64));
+        assert!((self.n_draws as u64) < (P as u64));
         let zero = M31::zero();
-        let n_sent = M31::from(self.channel_time.n_sent);
+        let n_sent = M31::from(self.n_draws);
         let mut state = [
             n_sent,
             zero,
@@ -50,7 +54,7 @@ impl Poseidon31Channel {
         ];
 
         poseidon2_permute(&mut state);
-        self.channel_time.inc_sent();
+        self.n_draws += 1;
 
         // extract elements from the first 8 elements, not the last 8 elements
         state.first_chunk::<8>().unwrap().clone()
@@ -60,14 +64,36 @@ impl Poseidon31Channel {
 impl Channel for Poseidon31Channel {
     const BYTES_PER_HASH: usize = POSEIDON31_BYTES_PER_HASH;
 
-    fn trailing_zeros(&self) -> u32 {
+    fn verify_pow_nonce(&self, n_bits: u32, nonce: u64) -> bool {
+        // For Poseidon31, we compute H(digest, nonce) and check trailing zeros
+        let zero = M31::zero();
+        let mut state = [
+            M31::from((nonce & ((1 << 22) - 1)) as u32),
+            M31::from(((nonce >> 22) & ((1 << 21) - 1)) as u32),
+            M31::from(((nonce >> 43) & ((1 << 21) - 1)) as u32),
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            self.digest[0],
+            self.digest[1],
+            self.digest[2],
+            self.digest[3],
+            self.digest[4],
+            self.digest[5],
+            self.digest[6],
+            self.digest[7],
+        ];
+        poseidon2_permute(&mut state);
+        let result = state.last_chunk::<8>().unwrap();
         let mut bytes = [0u8; 16];
-        bytes[0..4].copy_from_slice(&self.digest[0].0.to_le_bytes());
-        bytes[4..8].copy_from_slice(&self.digest[1].0.to_le_bytes());
-        bytes[8..12].copy_from_slice(&self.digest[2].0.to_le_bytes());
-        bytes[12..16].copy_from_slice(&self.digest[3].0.to_le_bytes());
-
-        u128::from_le_bytes(bytes).trailing_zeros()
+        bytes[0..4].copy_from_slice(&result[0].0.to_le_bytes());
+        bytes[4..8].copy_from_slice(&result[1].0.to_le_bytes());
+        bytes[8..12].copy_from_slice(&result[2].0.to_le_bytes());
+        bytes[12..16].copy_from_slice(&result[3].0.to_le_bytes());
+        let n_zeros = u128::from_le_bytes(bytes).trailing_zeros();
+        n_zeros >= n_bits
     }
 
     fn mix_felts(&mut self, felts: &[SecureField]) {
@@ -194,19 +220,16 @@ mod tests {
     use crate::m31;
 
     #[test]
-    fn test_channel_time() {
+    fn test_n_draws() {
         let mut channel = Poseidon31Channel::default();
 
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 0);
+        assert_eq!(channel.n_draws, 0);
 
         channel.draw_random_bytes();
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 1);
+        assert_eq!(channel.n_draws, 1);
 
         channel.draw_secure_felts(9);
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 6);
+        assert_eq!(channel.n_draws, 6);
     }
 
     #[test]
@@ -246,13 +269,13 @@ mod tests {
     #[test]
     pub fn test_mix_felts() {
         let mut channel = Poseidon31Channel::default();
-        let initial_digest = channel.digest;
+        let initial_digest = channel.digest();
         let felts: Vec<SecureField> = (0..2)
             .map(|i| SecureField::from(m31!(i + 1923782)))
             .collect();
 
         channel.mix_felts(felts.as_slice());
 
-        assert_ne!(initial_digest, channel.digest);
+        assert_ne!(initial_digest, channel.digest());
     }
 }

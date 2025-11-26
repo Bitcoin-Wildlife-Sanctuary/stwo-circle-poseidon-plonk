@@ -1,7 +1,7 @@
 use num_traits::Zero;
 use sha2::{Digest, Sha256};
 
-use crate::core::channel::{Channel, ChannelTime};
+use crate::core::channel::Channel;
 use crate::core::fields::m31::{BaseField, M31};
 use crate::core::fields::qm31::{SecureField, QM31};
 use crate::core::vcs::bitcoin_num_to_bytes;
@@ -13,7 +13,7 @@ pub const FELTS_PER_HASH: usize = 8;
 #[derive(Clone, Debug, Default)]
 pub struct Sha256Channel {
     digest: Sha256Hash,
-    pub channel_time: ChannelTime,
+    n_draws: u32,
 }
 
 impl Sha256Channel {
@@ -22,7 +22,7 @@ impl Sha256Channel {
     }
     pub fn update_digest(&mut self, new_digest: Sha256Hash) {
         self.digest = new_digest;
-        self.channel_time.inc_challenges();
+        self.n_draws = 0;
     }
 
     fn draw_base_felts(&mut self) -> [BaseField; FELTS_PER_HASH] {
@@ -30,14 +30,14 @@ impl Sha256Channel {
 
         let mut hasher = Sha256::new();
         Digest::update(&mut hasher, self.digest);
-        Digest::update(&mut hasher, self.channel_time.n_sent.to_le_bytes());
+        Digest::update(&mut hasher, self.n_draws.to_le_bytes());
         extract.copy_from_slice(hasher.finalize().as_slice());
 
         let mut res = [BaseField::zero(); FELTS_PER_HASH];
         for i in 0..FELTS_PER_HASH {
             res[i] = extract_common(&extract[i * 4..]);
         }
-        self.channel_time.inc_sent();
+        self.n_draws += 1;
         res
     }
 }
@@ -45,10 +45,15 @@ impl Sha256Channel {
 impl Channel for Sha256Channel {
     const BYTES_PER_HASH: usize = 32;
 
-    fn trailing_zeros(&self) -> u32 {
+    fn verify_pow_nonce(&self, n_bits: u32, nonce: u64) -> bool {
+        let mut hasher = Sha256::new();
+        Digest::update(&mut hasher, self.digest);
+        Digest::update(&mut hasher, &nonce.to_le_bytes());
+        let res = hasher.finalize();
         let mut bytes = [0u8; 16];
-        bytes.copy_from_slice(&self.digest.0[0..16]);
-        u128::from_be_bytes(bytes).trailing_zeros()
+        bytes.copy_from_slice(&res[0..16]);
+        let n_zeros = u128::from_be_bytes(bytes).trailing_zeros();
+        n_zeros >= n_bits
     }
 
     fn mix_felts(&mut self, felts: &[SecureField]) {
@@ -91,13 +96,20 @@ impl Channel for Sha256Channel {
     }
 
     fn draw_random_bytes(&mut self) -> Vec<u8> {
-        let mut extract = [0u8; 32];
+        let mut hash_input = self.digest.0.to_vec();
+
+        // Append counter bytes directly (4 bytes for u32).
+        let counter_bytes = self.n_draws.to_le_bytes();
+        hash_input.extend_from_slice(&counter_bytes);
+
+        // Append a zero byte for domain separation between generating randomness and mixing a
+        // single u32.
+        hash_input.push(0_u8);
 
         let mut hasher = Sha256::new();
-        Digest::update(&mut hasher, self.digest);
-        Digest::update(&mut hasher, self.channel_time.n_sent.to_le_bytes());
-        extract.copy_from_slice(hasher.finalize().as_slice());
-        self.channel_time.inc_sent();
+        Digest::update(&mut hasher, &hash_input);
+        let extract = hasher.finalize();
+        self.n_draws += 1;
 
         extract.to_vec()
     }
@@ -149,19 +161,16 @@ mod tests {
     use crate::m31;
 
     #[test]
-    fn test_channel_time() {
+    fn test_n_draws() {
         let mut channel = Sha256Channel::default();
 
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 0);
+        assert_eq!(channel.n_draws, 0);
 
         channel.draw_random_bytes();
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 1);
+        assert_eq!(channel.n_draws, 1);
 
         channel.draw_secure_felts(9);
-        assert_eq!(channel.channel_time.n_challenges, 0);
-        assert_eq!(channel.channel_time.n_sent, 6);
+        assert_eq!(channel.n_draws, 6);
     }
 
     #[test]

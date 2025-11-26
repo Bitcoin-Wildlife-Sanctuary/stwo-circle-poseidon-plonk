@@ -154,7 +154,7 @@ where
         commitment_scheme
             .polynomials()
             .as_cols_ref()
-            .map_cols(|c| c.evals.domain.log_size())
+            .map_cols(|c| c.evals.domain.log_size() - config.fri_config.log_blowup_factor)
             .0,
         stmt0.log_sizes().0
     );

@@ -1315,6 +1315,7 @@ where
     // Setup protocol.
     let channel = &mut MC::C::default();
     let mut commitment_scheme = CommitmentSchemeProver::<_, MC>::new(config, &twiddles);
+    commitment_scheme.set_store_polynomials_coefficients();
 
     let trace = gen_trace(flow);
     let constant_trace = gen_constant_trace(flow);
@@ -1359,9 +1360,18 @@ where
 
     // Sanity check. Remove for production.
     let trace_polys = commitment_scheme
-        .trees
+        .polynomials()
         .as_ref()
-        .map(|t| t.polynomials.iter().cloned().collect_vec());
+        .map(|tree| {
+            tree.iter()
+                .map(|poly| {
+                    poly.coeffs
+                        .as_ref()
+                        .expect("polynomial coefficients should be stored")
+                        .clone()
+                })
+                .collect_vec()
+        });
 
     let component_eval = component.clone();
     assert_constraints_on_polys(

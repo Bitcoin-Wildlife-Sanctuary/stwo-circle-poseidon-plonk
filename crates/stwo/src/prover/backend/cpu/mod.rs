@@ -30,7 +30,7 @@ use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
 use crate::core::vcs::sha256_merkle::Sha256MerkleChannel;
 use crate::core::vcs::sha256_poseidon31_merkle::Sha256Poseidon31MerkleChannel;
 use crate::prover::lookups::mle::Mle;
-use crate::prover::poly::circle::{CircleEvaluation, CirclePoly};
+use crate::prover::poly::circle::{CircleCoefficients, CircleEvaluation};
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 pub struct CpuBackend;
@@ -44,7 +44,7 @@ impl BackendForChannel<Poseidon31MerkleChannel> for CpuBackend {}
 impl BackendForChannel<Sha256MerkleChannel> for CpuBackend {}
 impl BackendForChannel<Sha256Poseidon31MerkleChannel> for CpuBackend {}
 
-impl<T: Debug + Clone + Default> ColumnOps<T> for CpuBackend {
+impl<T: Debug + Clone + Default + Send + Sync> ColumnOps<T> for CpuBackend {
     type Column = Vec<T>;
 
     fn bit_reverse_column(column: &mut Self::Column) {
@@ -52,7 +52,7 @@ impl<T: Debug + Clone + Default> ColumnOps<T> for CpuBackend {
     }
 }
 
-impl<T: Debug + Clone + Default> Column<T> for Vec<T> {
+impl<T: Debug + Clone + Default + Send + Sync> Column<T> for Vec<T> {
     fn zeros(len: usize) -> Self {
         vec![T::default(); len]
     }
@@ -80,7 +80,7 @@ impl<T: Debug + Clone + Default> Column<T> for Vec<T> {
     }
 }
 
-pub type CpuCirclePoly = CirclePoly<CpuBackend>;
+pub type CpuCirclePoly = CircleCoefficients<CpuBackend>;
 pub type CpuCircleEvaluation<F, EvalOrder> = CircleEvaluation<CpuBackend, F, EvalOrder>;
 pub type CpuMle<F> = Mle<CpuBackend, F>;
 

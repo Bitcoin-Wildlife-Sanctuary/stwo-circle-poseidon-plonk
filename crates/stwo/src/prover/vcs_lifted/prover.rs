@@ -131,7 +131,7 @@ mod test {
     use crate::core::vcs_lifted::blake2_merkle::{Blake2sMerkleHasher, LEAF_PREFIX};
     use crate::prover::backend::cpu::CpuCirclePoly;
     use crate::prover::backend::{ColumnOps, CpuBackend};
-    use crate::prover::poly::circle::{CircleEvaluation, CirclePoly, PolyOps};
+    use crate::prover::poly::circle::{CircleCoefficients, CircleEvaluation, PolyOps};
     use crate::prover::poly::BitReversedOrder;
     use crate::prover::vcs::prover::MerkleProver;
 
@@ -223,7 +223,7 @@ mod test {
     }
 
     fn lift_poly<B: ColumnOps<BaseField> + PolyOps>(
-        poly: &CirclePoly<B>,
+        poly: &CircleCoefficients<B>,
         lifted_log_size: u32,
     ) -> CircleEvaluation<B, BaseField, BitReversedOrder> {
         let lifted_domain = CanonicCoset::new(lifted_log_size).circle_domain();
@@ -238,7 +238,7 @@ mod test {
                 .to_m31_array()[0]
             })
             .collect();
-        B::bit_reverse_column(&mut lifted_evaluation);
+        <B as ColumnOps<BaseField>>::bit_reverse_column(&mut lifted_evaluation);
         CircleEvaluation::new(lifted_domain, lifted_evaluation)
     }
 

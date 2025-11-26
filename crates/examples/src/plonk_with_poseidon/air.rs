@@ -223,6 +223,7 @@ where
     // Setup protocol.
     let channel = &mut MC::C::default();
     let mut commitment_scheme = CommitmentSchemeProver::new(config, &twiddles);
+    commitment_scheme.set_store_polynomials_coefficients();
 
     // Preprocessed trace
     let plonk_constant_trace = [
@@ -339,6 +340,7 @@ where
     // Setup protocol.
     let channel = &mut MC::C::default();
     let mut commitment_scheme = CommitmentSchemeProver::new(config, &twiddles);
+    commitment_scheme.set_store_polynomials_coefficients();
 
     // Preprocessed trace
     let plonk_constant_trace = [
@@ -505,7 +507,7 @@ mod test {
     use stwo::core::vcs::sha256_merkle::Sha256MerkleChannel;
     use stwo::core::vcs::sha256_poseidon31_merkle::Sha256Poseidon31MerkleChannel;
     use crate::plonk_with_poseidon::air::{
-        prove_plonk_with_poseidon, verify_plonk_with_poseidon, PlonkWithPoseidonProof,
+        PlonkWithPoseidonProof, prove_plonk_with_poseidon, prove_plonk_with_poseidon_unchecked, verify_plonk_with_poseidon
     };
     use crate::plonk_with_poseidon::plonk::{
         prove_plonk_with_accelerator, PlonkWithAcceleratorCircuitTrace,
@@ -906,6 +908,19 @@ mod test {
         };
 
         let proof = prove_plonk_with_poseidon::<Sha256MerkleChannel>(config, &plonk, &mut poseidon);
+        verify_plonk_with_poseidon::<Sha256MerkleChannel>(proof, config, &[(1, QM31::one())])
+            .unwrap();
+    }
+
+    #[test]
+    fn test_joint_proof_sha256_unchecked() {
+        let (plonk, mut poseidon) = generate_test_circuit();
+        let config = PcsConfig {
+            pow_bits: 10,
+            fri_config: FriConfig::new(2, 4, 64),
+        };
+
+        let proof = prove_plonk_with_poseidon_unchecked::<Sha256MerkleChannel>(config, &plonk, &mut poseidon);
         verify_plonk_with_poseidon::<Sha256MerkleChannel>(proof, config, &[(1, QM31::one())])
             .unwrap();
     }

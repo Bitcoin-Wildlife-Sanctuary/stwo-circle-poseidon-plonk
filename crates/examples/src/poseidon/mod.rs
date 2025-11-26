@@ -350,6 +350,7 @@ where
     // Setup protocol.
     let channel = &mut MC::C::default();
     let mut commitment_scheme = CommitmentSchemeProver::<_, MC>::new(config, &twiddles);
+    commitment_scheme.set_store_polynomials_coefficients();
 
     // Preprocessed trace.
     let span = span!(Level::INFO, "Constant").entered();

@@ -3,6 +3,11 @@ use std::mem::transmute;
 use std::simd::Simd;
 
 use bytemuck::Zeroable;
+#[cfg(not(feature = "parallel"))]
+use itertools::Itertools;
+use num_traits::One;
+#[cfg(feature = "parallel")]
+use num_traits::Zero;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 use tracing::{span, Level};
@@ -11,10 +16,11 @@ use super::fft::{ifft, rfft, CACHED_FFT_LOG_SIZE, MIN_FFT_LOG_SIZE};
 use super::m31::{PackedBaseField, LOG_N_LANES, N_LANES};
 use super::qm31::PackedSecureField;
 use super::SimdBackend;
-use crate::core::circle::{CirclePoint, Coset, M31_CIRCLE_LOG_ORDER};
+use crate::core::circle::{CirclePoint, CirclePointIndex, Coset, M31_CIRCLE_LOG_ORDER};
+use crate::core::constraints::{coset_vanishing, coset_vanishing_derivative, point_vanishing};
 use crate::core::fields::m31::BaseField;
 use crate::core::fields::qm31::SecureField;
-use crate::core::fields::{Field, FieldExpOps};
+use crate::core::fields::{batch_inverse, Field, FieldExpOps};
 use crate::core::poly::circle::{CanonicCoset, CircleDomain};
 use crate::core::poly::utils::{domain_line_twiddles_from_tree, fold, get_folding_alphas};
 use crate::core::utils::bit_reverse_index;
@@ -25,7 +31,7 @@ use crate::prover::backend::simd::fri::fold_circle_evaluation_into_line;
 use crate::prover::backend::simd::m31::PackedM31;
 use crate::prover::backend::{Col, Column, CpuBackend};
 use crate::prover::fri::FriOps;
-use crate::prover::poly::circle::{CircleEvaluation, CirclePoly, PolyOps};
+use crate::prover::poly::circle::{CircleCoefficients, CircleEvaluation, PolyOps};
 use crate::prover::poly::twiddles::TwiddleTree;
 use crate::prover::poly::BitReversedOrder;
 
@@ -134,12 +140,12 @@ impl PolyOps for SimdBackend {
     fn interpolate(
         eval: CircleEvaluation<Self, BaseField, BitReversedOrder>,
         twiddles: &TwiddleTree<Self>,
-    ) -> CirclePoly<Self> {
+    ) -> CircleCoefficients<Self> {
         let _span = span!(Level::TRACE, "", class = "iFFT").entered();
         let log_size = eval.values.length.ilog2();
         if log_size < MIN_FFT_LOG_SIZE {
             let cpu_poly = eval.to_cpu().interpolate();
-            return CirclePoly::new(cpu_poly.coeffs.into_iter().collect());
+            return CircleCoefficients::new(cpu_poly.coeffs.into_iter().collect());
         }
 
         let mut values = eval.values;
@@ -158,10 +164,13 @@ impl PolyOps for SimdBackend {
         let inv = PackedBaseField::broadcast(BaseField::from(eval.domain.size()).inverse());
         values.data.iter_mut().for_each(|x| *x *= inv);
 
-        CirclePoly::new(values)
+        CircleCoefficients::new(values)
     }
 
-    fn eval_at_point(poly: &CirclePoly<Self>, point: CirclePoint<SecureField>) -> SecureField {
+    fn eval_at_point(
+        poly: &CircleCoefficients<Self>,
+        point: CirclePoint<SecureField>,
+    ) -> SecureField {
         // If the polynomial is small, fallback to evaluate directly.
         // TODO(Ohad): it's possible to avoid falling back. Consider fixing.
         if poly.log_size() <= 8 {
@@ -225,6 +234,119 @@ impl PolyOps for SimdBackend {
         (sum * twiddle_lows).pointwise_sum()
     }
 
+    fn barycentric_weights(
+        coset: CanonicCoset,
+        p: CirclePoint<SecureField>,
+    ) -> Col<SimdBackend, SecureField> {
+        let domain = coset.circle_domain();
+        let log_size = domain.log_size();
+        let weights_vec_len = domain.size().div_ceil(N_LANES);
+        if weights_vec_len == 1 {
+            return Col::<SimdBackend, SecureField>::from_iter(CircleEvaluation::<
+                CpuBackend,
+                BaseField,
+                BitReversedOrder,
+            >::barycentric_weights(
+                coset, p
+            ));
+        }
+
+        let p = p.into_ef::<SecureField>();
+        let p_0 = domain.at(0).into_ef::<SecureField>();
+        let si_0 = SecureField::one()
+            / ((p_0.y * SecureField::from(-2))
+                * coset_vanishing_derivative(
+                    Coset::new(CirclePointIndex::generator(), log_size),
+                    p_0,
+                ));
+
+        #[cfg(not(feature = "parallel"))]
+        let vi_p = (0..weights_vec_len)
+            .map(|i| {
+                PackedSecureField::from_array(std::array::from_fn(|j| {
+                    point_vanishing(
+                        domain
+                            .at(bit_reverse_index(i * N_LANES + j, log_size))
+                            .into_ef::<SecureField>(),
+                        p,
+                    )
+                }))
+            })
+            .collect_vec();
+
+        #[cfg(feature = "parallel")]
+        let vi_p: Vec<PackedSecureField> = (0..weights_vec_len)
+            .into_par_iter()
+            .map(|i| {
+                PackedSecureField::from_array(std::array::from_fn(|j| {
+                    point_vanishing(
+                        domain
+                            .at(bit_reverse_index(i * N_LANES + j, log_size))
+                            .into_ef::<SecureField>(),
+                        p,
+                    )
+                }))
+            })
+            .collect();
+
+        let vi_p_inverse = batch_inverse(&vi_p);
+
+        let vn_p: SecureField = coset_vanishing(CanonicCoset::new(log_size).coset, p);
+
+        // S_i(i) is invariant under G_(n−1) and alternate under J, meaning the S_i(i) values are
+        // the same for each half coset, and the second half coset values are the conjugate
+        // of the first half coset values.
+        // weights_vec_len is even because domain.size() is a power of 2 (we already dealt with the
+        // case where domain.size() < N_LANES).
+        let si_i_vn_p = PackedSecureField::from_array(std::array::from_fn(|i| {
+            if i.is_multiple_of(2) {
+                si_0 * vn_p
+            } else {
+                -si_0 * vn_p
+            }
+        }));
+
+        #[cfg(not(feature = "parallel"))]
+        let weights = (0..weights_vec_len)
+            .map(|i| vi_p_inverse[i] * si_i_vn_p)
+            .collect_vec();
+
+        #[cfg(feature = "parallel")]
+        let weights: Vec<PackedSecureField> = (0..weights_vec_len)
+            .into_par_iter()
+            .map(|i| vi_p_inverse[i] * si_i_vn_p)
+            .collect();
+
+        Col::<Self, SecureField> {
+            data: weights,
+            length: domain.size(),
+        }
+    }
+
+    fn barycentric_eval_at_point(
+        evals: &CircleEvaluation<SimdBackend, BaseField, BitReversedOrder>,
+        weights: &Col<SimdBackend, SecureField>,
+    ) -> SecureField {
+        #[cfg(not(feature = "parallel"))]
+        return (0..evals.domain.size().div_ceil(N_LANES))
+            .fold(PackedSecureField::zero(), |acc, i| {
+                acc + (weights.data[i] * evals.values.data[i])
+            })
+            .pointwise_sum();
+
+        #[cfg(feature = "parallel")]
+        return (0..evals.domain.size().div_ceil(N_LANES))
+            .into_par_iter()
+            .fold(
+                PackedSecureField::zero,
+                |acc: PackedSecureField, i: usize| acc + (weights.data[i] * evals.values.data[i]),
+            )
+            .sum::<PackedSecureField>()
+            .to_array()
+            .into_par_iter()
+            .sum::<SecureField>();
+    }
+
     fn eval_at_point_by_folding(
         evals: &CircleEvaluation<Self, BaseField, BitReversedOrder>,
         point: CirclePoint<SecureField>,
@@ -244,14 +366,14 @@ impl PolyOps for SimdBackend {
         layer_evaluation.values.at(0) / SecureField::from(2_u32.pow(log_size))
     }
 
-    fn extend(poly: &CirclePoly<Self>, log_size: u32) -> CirclePoly<Self> {
+    fn extend(poly: &CircleCoefficients<Self>, log_size: u32) -> CircleCoefficients<Self> {
         // TODO(shahars): Get rid of extends.
         poly.evaluate(CanonicCoset::new(log_size).circle_domain())
             .interpolate()
     }
 
     fn evaluate(
-        poly: &CirclePoly<Self>,
+        poly: &CircleCoefficients<Self>,
         domain: CircleDomain,
         twiddles: &TwiddleTree<Self>,
     ) -> CircleEvaluation<Self, BaseField, BitReversedOrder> {
@@ -264,7 +386,8 @@ impl PolyOps for SimdBackend {
         );
 
         if fft_log_size < MIN_FFT_LOG_SIZE {
-            let cpu_poly: CirclePoly<CpuBackend> = CirclePoly::new(poly.coeffs.to_cpu());
+            let cpu_poly: CircleCoefficients<CpuBackend> =
+                CircleCoefficients::new(poly.coeffs.to_cpu());
             let cpu_eval = cpu_poly.evaluate(domain);
             return CircleEvaluation::new(
                 cpu_eval.domain,
@@ -360,7 +483,9 @@ impl PolyOps for SimdBackend {
         }
     }
 
-    fn split_at_mid(mut poly: CirclePoly<Self>) -> (CirclePoly<Self>, CirclePoly<Self>) {
+    fn split_at_mid(
+        mut poly: CircleCoefficients<Self>,
+    ) -> (CircleCoefficients<Self>, CircleCoefficients<Self>) {
         let length = poly.coeffs.length;
 
         // If the length fits only in one SIMD vector, need to split from the cpu vector.
@@ -368,8 +493,8 @@ impl PolyOps for SimdBackend {
             let mut cpu_vec = poly.coeffs.to_cpu();
             let right = cpu_vec.split_off(cpu_vec.len() / 2);
             return (
-                CirclePoly::new(cpu_vec.into_iter().collect()),
-                CirclePoly::new(right.into_iter().collect()),
+                CircleCoefficients::new(cpu_vec.into_iter().collect()),
+                CircleCoefficients::new(right.into_iter().collect()),
             );
         }
 
@@ -409,11 +534,11 @@ impl PolyOps for SimdBackend {
         let right_length = length - left_length;
 
         (
-            CirclePoly::new(BaseColumn {
+            CircleCoefficients::new(BaseColumn {
                 data: poly.coeffs.data,
                 length: left_length,
             }),
-            CirclePoly::new(BaseColumn {
+            CircleCoefficients::new(BaseColumn {
                 data: second,
                 length: right_length,
             }),
@@ -468,7 +593,7 @@ fn compute_coset_twiddles(coset: Coset, twiddles: &mut Vec<PackedM31>) {
 }
 
 fn slow_eval_at_point(
-    poly: &CirclePoly<SimdBackend>,
+    poly: &CircleCoefficients<SimdBackend>,
     point: CirclePoint<SecureField>,
 ) -> SecureField {
     let mut mappings = vec![point.y, point.x];
@@ -507,7 +632,7 @@ mod tests {
     use crate::prover::backend::simd::m31::LOG_N_LANES;
     use crate::prover::backend::simd::SimdBackend;
     use crate::prover::backend::{Column, CpuBackend};
-    use crate::prover::poly::circle::{CircleEvaluation, CirclePoly, PolyOps};
+    use crate::prover::poly::circle::{CircleCoefficients, CircleEvaluation, PolyOps};
     use crate::prover::poly::{BitReversedOrder, NaturalOrder};
 
     #[test]
@@ -571,7 +696,7 @@ mod tests {
 
     #[test]
     fn test_simd_eval_at_point_by_folding() {
-        let poly = CirclePoly::<SimdBackend>::new(BaseColumn::from_cpu(
+        let poly = CircleCoefficients::<SimdBackend>::new(BaseColumn::from_cpu(
             [691, 805673, 5, 435684, 4832, 23876431, 197, 897346068]
                 .map(BaseField::from)
                 .to_vec(),
@@ -606,8 +731,9 @@ mod tests {
     #[test]
     fn test_circle_poly_extend() {
         for log_size in MIN_FFT_LOG_SIZE..CACHED_FFT_LOG_SIZE + 2 {
-            let poly =
-                CirclePoly::<SimdBackend>::new((0..1 << log_size).map(BaseField::from).collect());
+            let poly = CircleCoefficients::<SimdBackend>::new(
+                (0..1 << log_size).map(BaseField::from).collect(),
+            );
             let eval0 = poly.evaluate(CanonicCoset::new(log_size + 2).circle_domain());
 
             let eval1 = poly
@@ -656,8 +782,9 @@ mod tests {
     #[test]
     fn test_circle_poly_split_at_mid_small() {
         let log_size = LOG_N_LANES;
-        let poly =
-            CirclePoly::<SimdBackend>::new((0..1 << log_size).map(BaseField::from).collect());
+        let poly = CircleCoefficients::<SimdBackend>::new(
+            (0..1 << log_size).map(BaseField::from).collect(),
+        );
         let (left, right) = poly.clone().split_at_mid();
         let random_point = CirclePoint::get_point(21903);
 
@@ -671,8 +798,9 @@ mod tests {
     #[test]
     fn test_circle_poly_split_at_mid_medium() {
         let log_size = (CACHED_FFT_LOG_SIZE - LOG_N_LANES) / 2;
-        let poly =
-            CirclePoly::<SimdBackend>::new((0..1 << log_size).map(BaseField::from).collect());
+        let poly = CircleCoefficients::<SimdBackend>::new(
+            (0..1 << log_size).map(BaseField::from).collect(),
+        );
         let (left, right) = poly.clone().split_at_mid();
         let random_point = CirclePoint::get_point(21903);
 
@@ -686,8 +814,9 @@ mod tests {
     #[test]
     fn test_circle_poly_split_at_mid_large() {
         let log_size = CACHED_FFT_LOG_SIZE + 1;
-        let poly =
-            CirclePoly::<SimdBackend>::new((0..1 << log_size).map(BaseField::from).collect());
+        let poly = CircleCoefficients::<SimdBackend>::new(
+            (0..1 << log_size).map(BaseField::from).collect(),
+        );
         let (left, right) = poly.clone().split_at_mid();
         let random_point = CirclePoint::get_point(21903);
 
@@ -696,5 +825,78 @@ mod tests {
                 + random_point.repeated_double(log_size - 2).x * right.eval_at_point(random_point),
             poly.eval_at_point(random_point)
         );
+    }
+
+    #[test]
+    fn test_simd_barycentric_evaluation() {
+        let poly = CircleCoefficients::<SimdBackend>::new(BaseColumn::from_cpu(
+            [691, 805673, 5, 435684, 4832, 23876431, 197, 897346068]
+                .map(BaseField::from)
+                .to_vec(),
+        ));
+        let s = CanonicCoset::new(10);
+        let domain = s.circle_domain();
+        let eval = poly.evaluate(domain);
+        let sampled_points = [
+            CirclePoint::get_point(348),
+            CirclePoint::get_point(9736524),
+            CirclePoint::get_point(13),
+            CirclePoint::get_point(346752),
+        ];
+        let sampled_values = sampled_points
+            .iter()
+            .map(|point| poly.eval_at_point(*point))
+            .collect_vec();
+
+        let sampled_barycentric_values = sampled_points
+            .iter()
+            .map(|point| {
+                eval.barycentric_eval_at_point(&CircleEvaluation::<
+                    SimdBackend,
+                    BaseField,
+                    BitReversedOrder,
+                >::barycentric_weights(s, *point))
+            })
+            .collect_vec();
+
+        assert_eq!(
+            sampled_barycentric_values, sampled_values,
+            "Barycentric evaluation should be equal to the polynomial evaluation"
+        );
+    }
+
+    #[test]
+    fn test_simd_barycentric_weights() {
+        let s = CanonicCoset::new(10);
+        let sampled_points = [
+            CirclePoint::get_point(348),
+            CirclePoint::get_point(9736524),
+            CirclePoint::get_point(13),
+            CirclePoint::get_point(346752),
+        ];
+
+        let cpu_weights = sampled_points
+            .iter()
+            .map(|point| {
+                CircleEvaluation::<CpuBackend, BaseField, BitReversedOrder>::barycentric_weights(
+                    s, *point,
+                )
+            })
+            .collect_vec();
+        let simd_weights = sampled_points
+            .iter()
+            .map(|point| {
+                CircleEvaluation::<SimdBackend, BaseField, BitReversedOrder>::barycentric_weights(
+                    s, *point,
+                )
+            })
+            .collect_vec();
+
+        cpu_weights
+            .iter()
+            .zip(simd_weights.iter())
+            .for_each(|(cpu_weights, simd_weights)| {
+                assert_eq!(*cpu_weights, simd_weights.to_cpu());
+            });
     }
 }

@@ -74,12 +74,12 @@ impl Channel for Sha256Channel {
         }
     }
 
-    fn draw_felt(&mut self) -> SecureField {
+    fn draw_secure_felt(&mut self) -> SecureField {
         let res = self.draw_base_felts();
         SecureField::from_m31(res[0], res[1], res[2], res[3])
     }
 
-    fn draw_felts(&mut self, n_felts: usize) -> Vec<SecureField> {
+    fn draw_secure_felts(&mut self, n_felts: usize) -> Vec<SecureField> {
         let mut res = Vec::with_capacity(n_felts + 1);
         for _ in 0..n_felts.div_ceil(2) {
             let t = self.draw_base_felts();
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(channel.channel_time.n_challenges, 0);
         assert_eq!(channel.channel_time.n_sent, 1);
 
-        channel.draw_felts(9);
+        channel.draw_secure_felts(9);
         assert_eq!(channel.channel_time.n_challenges, 0);
         assert_eq!(channel.channel_time.n_sent, 6);
     }
@@ -178,18 +178,18 @@ mod tests {
     pub fn test_draw_felt() {
         let mut channel = Sha256Channel::default();
 
-        let first_random_felt = channel.draw_felt();
+        let first_random_felt = channel.draw_secure_felt();
 
         // Assert that next random felt is different.
-        assert_ne!(first_random_felt, channel.draw_felt());
+        assert_ne!(first_random_felt, channel.draw_secure_felt());
     }
 
     #[test]
     pub fn test_draw_felts() {
         let mut channel = Sha256Channel::default();
 
-        let mut random_felts = channel.draw_felts(5);
-        random_felts.extend(channel.draw_felts(4));
+        let mut random_felts = channel.draw_secure_felts(5);
+        random_felts.extend(channel.draw_secure_felts(4));
 
         // Assert that all the random felts are unique.
         assert_eq!(

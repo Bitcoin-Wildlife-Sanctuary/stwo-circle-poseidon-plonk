@@ -48,12 +48,12 @@ impl Channel for Sha256Poseidon31Channel {
         self.inner.mix_u32s(data);
     }
 
-    fn draw_felt(&mut self) -> SecureField {
-        self.inner.draw_felt()
+    fn draw_secure_felt(&mut self) -> SecureField {
+        self.inner.draw_secure_felt()
     }
 
-    fn draw_felts(&mut self, n_felts: usize) -> Vec<SecureField> {
-        self.inner.draw_felts(n_felts)
+    fn draw_secure_felts(&mut self, n_felts: usize) -> Vec<SecureField> {
+        self.inner.draw_secure_felts(n_felts)
     }
 
     fn draw_random_bytes(&mut self) -> Vec<u8> {

@@ -16,7 +16,7 @@ use crate::core::channel::{
     Blake2sChannel, Poseidon31Channel, Sha256Channel, Sha256Poseidon31Channel,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::core::channel::{Channel, Poseidon252Channel};
+use crate::core::channel::Channel;
 use crate::core::fields::m31::M31;
 use crate::core::proof_of_work::GrindOps;
 

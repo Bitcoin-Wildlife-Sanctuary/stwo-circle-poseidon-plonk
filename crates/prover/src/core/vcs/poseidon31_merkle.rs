@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::channel::{MerkleChannel, Poseidon31Channel};
 use crate::core::fields::m31::{BaseField, M31};
-use crate::core::vcs::ops::MerkleHasher;
+use crate::core::vcs::MerkleHasher;
 use crate::core::vcs::poseidon31_hash::Poseidon31Hash;
 use crate::core::vcs::poseidon31_ref::{poseidon2_permute, Poseidon31CRH};
 

@@ -6,25 +6,24 @@ use itertools::Itertools;
 use num_traits::One;
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
-use stwo_constraint_framework::logup::LogupTraceGenerator;
 use stwo_constraint_framework::{
-    relation, EvalAtRow, FrameworkComponent, FrameworkEval, Relation, RelationEntry,
-    TraceLocationAllocator,
+    relation, EvalAtRow, FrameworkComponent, FrameworkEval, LogupTraceGenerator, Relation,
+    RelationEntry, TraceLocationAllocator,
 };
-use stwo_prover::core::backend::simd::column::BaseColumn;
-use stwo_prover::core::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
-use stwo_prover::core::backend::simd::qm31::PackedSecureField;
-use stwo_prover::core::backend::simd::SimdBackend;
-use stwo_prover::core::backend::{BackendForChannel, Col, Column};
-use stwo_prover::core::channel::MerkleChannel;
+use stwo_prover::core::ColumnVec;
+use stwo_prover::prover::backend::simd::column::BaseColumn;
+use stwo_prover::prover::backend::simd::m31::{PackedBaseField, LOG_N_LANES};
+use stwo_prover::prover::backend::simd::qm31::PackedSecureField;
+use stwo_prover::prover::backend::simd::SimdBackend;
+use stwo_prover::prover::backend::{BackendForChannel, Col, Column};
+use stwo_prover::prover::backend::MerkleChannel;
 use stwo_prover::core::fields::m31::BaseField;
 use stwo_prover::core::fields::qm31::SecureField;
 use stwo_prover::core::fields::FieldExpOps;
-use stwo_prover::core::pcs::{CommitmentSchemeProver, PcsConfig};
-use stwo_prover::core::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
-use stwo_prover::core::poly::BitReversedOrder;
-use stwo_prover::core::prover::{prove, StarkProof};
-use stwo_prover::core::ColumnVec;
+use stwo_prover::prover::pcs::{CommitmentSchemeProver, PcsConfig};
+use stwo_prover::prover::poly::circle::{CanonicCoset, CircleEvaluation, PolyOps};
+use stwo_prover::prover::poly::BitReversedOrder;
+use stwo_prover::prover::prover::{prove, StarkProof};
 use tracing::{info, span, Level};
 
 const N_LOG_INSTANCES_PER_ROW: usize = 3;
@@ -407,9 +406,9 @@ mod tests {
     use stwo_prover::core::fri::FriConfig;
     use stwo_prover::core::pcs::{CommitmentSchemeVerifier, PcsConfig, TreeVec};
     use stwo_prover::core::poly::circle::CanonicCoset;
-    use stwo_prover::core::prover::verify;
     use stwo_prover::core::vcs::blake2_merkle::Blake2sMerkleChannel;
     use stwo_prover::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
+    use stwo_prover::prover::verifier::verify;
     use crate::poseidon::{
         apply_internal_round_matrix, apply_m4, eval_poseidon_constraints, gen_interaction_trace,
         gen_trace, prove_poseidon, PoseidonElements,

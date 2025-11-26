@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::core::channel::{MerkleChannel, Sha256Poseidon31Channel};
 use crate::core::fields::m31::BaseField;
 use crate::core::vcs::bitcoin_num_to_bytes;
-use crate::core::vcs::ops::MerkleHasher;
+use crate::core::vcs::MerkleHasher;
 use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleHasher;
 use crate::core::vcs::sha256_hash::{Sha256Hash, Sha256Hasher};
 

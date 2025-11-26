@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 use super::fields::qm31::SecureField;
-use super::vcs::ops::MerkleHasher;
+use super::vcs::MerkleHasher;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod poseidon252;
@@ -19,7 +19,6 @@ pub use sha256::Sha256Channel;
 
 mod sha256_poseidon31;
 pub use sha256_poseidon31::Sha256Poseidon31Channel;
-pub mod logging_channel;
 
 pub const EXTENSION_FELTS_PER_HASH: usize = 2;
 

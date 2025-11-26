@@ -1,0 +1,51 @@
+use serde::{Deserialize, Serialize};
+
+use super::{Backend, BackendForChannel};
+use crate::core::vcs::blake2_merkle::Blake2sMerkleChannel;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::core::vcs::poseidon252_merkle::Poseidon252MerkleChannel;
+use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleChannel;
+use crate::core::vcs::sha256_merkle::Sha256MerkleChannel;
+use crate::core::vcs::sha256_poseidon31_merkle::Sha256Poseidon31MerkleChannel;
+
+pub mod accumulation;
+pub mod bit_reverse;
+pub mod blake2s;
+#[cfg(test)]
+pub mod blake2s_ref;
+pub mod circle;
+pub mod cm31;
+pub mod column;
+pub mod conversion;
+pub mod domain;
+pub mod fft;
+pub mod fri;
+mod grind;
+pub mod lookups;
+pub mod m31;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod poseidon252;
+pub mod poseidon31;
+pub mod prefix_sum;
+pub mod qm31;
+pub mod quotients;
+pub mod sha256;
+pub mod sha256_poseidon31;
+mod utils;
+pub mod very_packed_m31;
+
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct SimdBackend;
+
+impl Backend for SimdBackend {}
+impl BackendForChannel<Blake2sMerkleChannel> for SimdBackend {}
+#[cfg(not(target_arch = "wasm32"))]
+impl BackendForChannel<Poseidon252MerkleChannel> for SimdBackend {}
+impl BackendForChannel<Poseidon31MerkleChannel> for SimdBackend {}
+impl BackendForChannel<Sha256MerkleChannel> for SimdBackend {}
+impl BackendForChannel<Sha256Poseidon31MerkleChannel> for SimdBackend {}
+
+// Optimal chunk sizes were determined empirically on an intel 155u machine.
+pub(super) const PACKED_M31_BATCH_INVERSE_CHUNK_SIZE: usize = 1 << 9;
+pub(super) const PACKED_CM31_BATCH_INVERSE_CHUNK_SIZE: usize = 1 << 10;
+pub(super) const PACKED_QM31_BATCH_INVERSE_CHUNK_SIZE: usize = 1 << 11;

@@ -1,11 +1,14 @@
 use blake2::Digest;
+use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 
 use crate::core::channel::{MerkleChannel, Sha256Poseidon31Channel};
-use crate::core::fields::m31::BaseField;
+use crate::core::fields::m31::{BaseField, M31};
 use crate::core::vcs::bitcoin_num_to_bytes;
 use crate::core::vcs::MerkleHasher;
+use crate::core::vcs::poseidon31_hash::Poseidon31Hash;
 use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleHasher;
+use crate::core::vcs::poseidon31_ref::Poseidon31CRH;
 use crate::core::vcs::sha256_hash::{Sha256Hash, Sha256Hasher};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Deserialize, Serialize)]
@@ -64,7 +67,12 @@ impl MerkleHasher for Sha256Poseidon31MerkleHasher {
                 Sha256Hash(hash)
             } else {
                 let mut hash = [0u8; 32];
-                let data = Poseidon31MerkleHasher::hash_column_get_rate(column_values);
+                let data = Poseidon31MerkleHasher::hash_column_get_capacity(column_values);
+                let mut state = [M31::zero(); 16];
+                for i in 0..8 {
+                    state[i + 8] = data.0[i];
+                }
+                let data = Poseidon31Hash(Poseidon31CRH::permute_get_rate(&state));
                 if hash_tree.is_some() {
                     let mut sha256 = sha2::Sha256::new();
                     Digest::update(&mut sha256, bitcoin_num_to_bytes(data.0[0]));

@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use stwo::core::backend::simd::SimdBackend;
-use stwo::core::backend::CpuBackend;
+use stwo::prover::backend::simd::SimdBackend;
+use stwo::prover::backend::CpuBackend;
 use stwo::core::channel::{Blake2sChannel, Channel, Poseidon31Channel};
 use stwo::core::proof_of_work::GrindOps;
 

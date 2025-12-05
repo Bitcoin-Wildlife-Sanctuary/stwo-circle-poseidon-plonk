@@ -1,8 +1,12 @@
 use itertools::Itertools;
+use num_traits::Zero;
 
 use crate::core::channel::{Channel, Sha256Channel};
+use crate::core::fields::m31::M31;
 use crate::core::fields::qm31::{SecureField, QM31};
+use crate::core::vcs::poseidon31_hash::Poseidon31Hash;
 use crate::core::vcs::poseidon31_merkle::Poseidon31MerkleHasher;
+use crate::core::vcs::poseidon31_ref::Poseidon31CRH;
 use crate::core::vcs::sha256_hash::Sha256Hash;
 
 #[derive(Clone, Debug, Default)]
@@ -32,7 +36,14 @@ impl Channel for Sha256Poseidon31Channel {
             self.inner.mix_felts(felts);
         } else {
             let elems = felts.iter().flat_map(|v| v.to_m31_array()).collect_vec();
-            let poseidon_hash = Poseidon31MerkleHasher::hash_column_get_rate(&elems);
+            let poseidon_hash = Poseidon31MerkleHasher::hash_column_get_capacity(&elems);
+
+            let mut state = [M31::zero(); 16];
+            for i in 0..8 {
+                state[i + 8] = poseidon_hash.0[i];
+            }
+            let poseidon_hash = Poseidon31Hash(Poseidon31CRH::permute_get_rate(&state));
+
             self.inner.mix_felts(&[
                 QM31::from_m31_array(poseidon_hash.0[0..4].try_into().unwrap()),
                 QM31::from_m31_array(poseidon_hash.0[4..8].try_into().unwrap()),

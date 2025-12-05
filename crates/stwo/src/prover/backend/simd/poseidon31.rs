@@ -82,11 +82,8 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                     for j in 0..min(len, 8) {
                         res[j] = columns[j].data[i];
                     }
-                    if hash_tree.is_none() {
-                        Some(permute_get_rate(res))
-                    } else {
-                        Some(permute_get_capacity(res))
-                    }
+
+                    Some(permute_get_capacity(res))
                 } else {
                     let mut res = [PackedM31::zero(); 16];
                     for j in 0..8 {
@@ -115,11 +112,7 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                             state[j + 8] = digest[j];
                         }
 
-                        if hash_tree.is_none() {
-                            digest = permute_get_rate(state);
-                        } else {
-                            digest = permute_get_capacity(state);
-                        }
+                        digest = permute_get_capacity(state);
                     } else {
                         let mut state = [PackedM31::zero(); 16];
                         for j in 0..remain {
@@ -129,11 +122,7 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                             state[j + 8] = digest[j];
                         }
 
-                        if hash_tree.is_none() {
-                            digest = permute_get_rate(state);
-                        } else {
-                            digest = permute_get_capacity(state);
-                        }
+                        digest = permute_get_capacity(state);
                     }
                     Some(digest)
                 }
@@ -153,7 +142,13 @@ impl MerkleOps<Poseidon31MerkleHasher> for SimdBackend {
                     permute_get_rate(state)
                 }
                 (Some(hash_tree), None) => hash_tree,
-                (None, Some(hash_column)) => hash_column,
+                (None, Some(hash_column)) => {
+                    let mut state = [PackedM31::zero(); 16];
+                    for j in 0..8 {
+                        state[j + 8] = hash_column[j];
+                    }
+                    permute_get_rate(state)
+                },
                 _ => unreachable!(),
             };
 

@@ -15,53 +15,6 @@ const ELEMENTS_IN_BLOCK: usize = 8;
 pub struct Poseidon31MerkleHasher;
 
 impl Poseidon31MerkleHasher {
-    pub fn hash_column_get_rate(column_values: &[BaseField]) -> Poseidon31Hash {
-        assert!(!column_values.is_empty());
-
-        let zero = M31::zero();
-        let len = column_values.len();
-        let num_chunk = len.div_ceil(ELEMENTS_IN_BLOCK);
-
-        if num_chunk == 1 {
-            let mut res = [zero; 16];
-            for i in 0..min(8, len) {
-                res[i] = column_values[i];
-            }
-            Poseidon31Hash(Poseidon31CRH::permute_get_rate(&res))
-        } else {
-            let mut res = [zero; 16];
-            for i in 0..8 {
-                res[i] = column_values[i];
-            }
-            let mut digest = Poseidon31CRH::permute_get_capacity(&res);
-
-            for chunk in column_values
-                .chunks_exact(ELEMENTS_IN_BLOCK)
-                .skip(1)
-                .take(num_chunk - 2)
-            {
-                let mut state = [zero; 16];
-                state[..8].copy_from_slice(chunk);
-                state[8..16].copy_from_slice(&digest);
-                digest = Poseidon31CRH::permute_get_capacity(&state);
-            }
-
-            let remain = len % ELEMENTS_IN_BLOCK;
-            if remain == 0 {
-                let mut state = [zero; 16];
-                state[..8].copy_from_slice(&column_values[len - 8..]);
-                state[8..16].copy_from_slice(&digest);
-                digest = Poseidon31CRH::permute_get_rate(&state);
-            } else {
-                let mut state = [zero; 16];
-                state[..remain].copy_from_slice(&column_values[len - remain..]);
-                state[8..16].copy_from_slice(&digest);
-                digest = Poseidon31CRH::permute_get_rate(&state);
-            }
-            Poseidon31Hash(digest)
-        }
-    }
-
     pub fn hash_column_get_capacity(column_values: &[BaseField]) -> Poseidon31Hash {
         assert!(!column_values.is_empty());
 
@@ -132,7 +85,13 @@ impl MerkleHasher for Poseidon31MerkleHasher {
         };
 
         if hash_tree.is_none() && !column_values.is_empty() {
-            Self::hash_column_get_rate(column_values)
+            let digest = Self::hash_column_get_capacity(column_values);
+
+            let mut state = [zero; 16];
+            for i in 0..8 {
+                state[i + 8] = digest.0[i];
+            }            
+            Poseidon31Hash(Poseidon31CRH::permute_get_rate(&state))
         } else if hash_tree.is_none() && column_values.is_empty() {
             Poseidon31Hash([zero; 8])
         } else if hash_tree.is_some() && column_values.is_empty() {

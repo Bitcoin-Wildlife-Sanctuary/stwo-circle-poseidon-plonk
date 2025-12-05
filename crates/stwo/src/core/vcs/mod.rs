@@ -19,7 +19,7 @@ pub mod sha256_poseidon31_merkle;
 pub mod utils;
 pub mod verifier;
 
-#[cfg(all(test, feature = "prover"))]
+#[cfg(test)]
 pub mod test_utils;
 
 pub fn bitcoin_num_to_bytes(v: M31) -> Vec<u8> {
